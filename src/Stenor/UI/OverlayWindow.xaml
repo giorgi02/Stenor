@@ -1,0 +1,95 @@
+<Window x:Class="Stenor.UI.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Stenor Overlay"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ShowActivated="False"
+        Focusable="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight">
+    <Window.Resources>
+        <SolidColorBrush x:Key="AccentBrush" Color="#A78BFA" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#9B9BA3" />
+        <Style x:Key="StatusText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#EDEDF0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="10,0,0,0" />
+        </Style>
+        <Style x:Key="CancelButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Margin" Value="12,0,0,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="Transparent" CornerRadius="10">
+                            <TextBlock Text="✕" Foreground="{TemplateBinding Foreground}"
+                                       FontSize="{TemplateBinding FontSize}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#33FFFFFF" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border CornerRadius="17" Background="#F21C1C22" Padding="16,11" Margin="12">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.45" />
+        </Border.Effect>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+
+            <StackPanel x:Name="RecordingPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <Ellipse x:Name="RecordingDot" Width="9" Height="9" Fill="#FF5A5F" VerticalAlignment="Center" />
+                <StackPanel x:Name="BarsPanel" Orientation="Horizontal" Margin="11,0,0,0"
+                            VerticalAlignment="Center" Height="20">
+                    <!-- Level bars are generated in code-behind. -->
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel x:Name="TranscribingPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <Ellipse x:Name="Spinner" Width="15" Height="15" StrokeThickness="2.5"
+                         Stroke="{StaticResource AccentBrush}" StrokeDashArray="6 3.5"
+                         VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <RotateTransform x:Name="SpinnerRotate" />
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <TextBlock Text="Transcribing…" Style="{StaticResource StatusText}" />
+            </StackPanel>
+
+            <StackPanel x:Name="DonePanel" Orientation="Horizontal" Visibility="Collapsed">
+                <TextBlock Text="✓" Foreground="#4ADE80" FontSize="14" FontWeight="Bold"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="Inserted" Style="{StaticResource StatusText}" />
+            </StackPanel>
+
+            <StackPanel x:Name="ErrorPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <TextBlock Text="⚠" Foreground="#FBBF24" FontSize="14" VerticalAlignment="Center" />
+                <TextBlock x:Name="ErrorText" Style="{StaticResource StatusText}"
+                           MaxWidth="280" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <Button x:Name="CancelButton" Style="{StaticResource CancelButton}"
+                    Click="OnCancelClick" ToolTip="Cancel" />
+        </StackPanel>
+    </Border>
+</Window>
