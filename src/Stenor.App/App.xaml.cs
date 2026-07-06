@@ -4,6 +4,7 @@ using Stenor.Interfaces;
 using Stenor.Services;
 using Stenor.UI;
 using Velopack;
+using Velopack.Sources;
 
 namespace Stenor;
 
@@ -15,6 +16,7 @@ public partial class App : Application
 {
     private const string MutexName = "Stenor.SingleInstance";
     private const string ShowSettingsEventName = "Stenor.ShowSettings";
+    private const string UpdateRepoUrl = "https://github.com/giorgi02/Stenor";
 
     private Mutex? _instanceMutex;
     private bool _ownsInstance;
@@ -200,19 +202,18 @@ public partial class App : Application
         };
     }
 
-    /// <summary>Velopack scaffold: checks and stages updates in the background, and only when a
-    /// feed URL is configured - a missing feed makes this a no-op, never a blocker.</summary>
-    private void CheckForUpdatesInBackground(string? feedUrl)
+    /// <summary>Velopack: checks and stages updates in the background. Defaults to GitHub
+    /// Releases on this repo; a non-empty UpdateFeedUrl in settings.json overrides it (handy
+    /// for testing against a local feed). Failures are logged and never block startup.</summary>
+    private void CheckForUpdatesInBackground(string? feedUrlOverride)
     {
-        if (string.IsNullOrWhiteSpace(feedUrl))
-        {
-            return;
-        }
         Task.Run(async () =>
         {
             try
             {
-                var manager = new UpdateManager(feedUrl);
+                var manager = string.IsNullOrWhiteSpace(feedUrlOverride)
+                    ? new UpdateManager(new GithubSource(UpdateRepoUrl, accessToken: null, prerelease: false))
+                    : new UpdateManager(feedUrlOverride);
                 if (!manager.IsInstalled)
                 {
                     return; // running unpackaged (dev build)

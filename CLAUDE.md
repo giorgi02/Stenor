@@ -8,9 +8,13 @@ recording → Gemini transcription → paste into the focused app. C# / .NET 10 
 ```powershell
 dotnet build Stenor.slnx -c Release                       # must stay warning-clean (TreatWarningsAsErrors)
 dotnet publish src/Stenor.App/Stenor.App.csproj -c Release -r win-x64 --self-contained   # production build
+pwsh scripts/pack.ps1                                     # Velopack installer → releases/ (needs: dotnet tool install -g vpk)
 ```
 
 - Publish output: `src/Stenor.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe`
+- Releases/auto-update: Velopack + GitHub Releases feed (`GithubSource` in `App.xaml.cs`);
+  runbook (version bump → pack → upload) in docs/release.md. Installer is unsigned —
+  SmartScreen warns on first run (known limitation).
 - No test project; verification is the manual checklist in docs/manual-checklist.md plus a smoke run
   (launch exe → check `%APPDATA%\Stenor\logs\stenor.log` for "Stenor started", tray icon, quit via tray).
 - **NuGet:** the machine-wide config has a dead feed (`nuget.lb.ge`). The repo-root

@@ -25,7 +25,8 @@ public sealed class AppSettings
     /// <summary>Off by default: per-character SendInput typing for apps where Ctrl+V paste is blocked.</summary>
     public bool UseUnicodeTypingFallback { get; set; }
 
-    /// <summary>Velopack update feed. Update checks are skipped when empty.</summary>
+    /// <summary>Optional Velopack feed override (hand-edit only). Empty means the default
+    /// GitHub Releases feed built into the app.</summary>
     public string? UpdateFeedUrl { get; set; }
 
     public AppSettings Clone() => new()
