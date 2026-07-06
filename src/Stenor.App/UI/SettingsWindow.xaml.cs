@@ -50,7 +50,7 @@ public partial class SettingsWindow : Window
             ? current.PrimaryLanguage
             : Languages[0];
         _selectedHotkey = current.Hotkey.Clone();
-        HotkeyButton.Content = _selectedHotkey.DisplayString;
+        HotkeyButton.Content = HotkeyDisplay.Describe(_selectedHotkey);
         HoldRadio.IsChecked = current.ActivationMode == ActivationMode.Hold;
         ToggleRadio.IsChecked = current.ActivationMode == ActivationMode.Toggle;
         StartupCheck.IsChecked = current.LaunchAtStartup;
@@ -224,7 +224,7 @@ public partial class SettingsWindow : Window
         {
             _selectedHotkey = captured;
         }
-        HotkeyButton.Content = _selectedHotkey.DisplayString;
+        HotkeyButton.Content = HotkeyDisplay.Describe(_selectedHotkey);
     }
 
     private static bool IsModifier(Key key) => key
@@ -272,7 +272,7 @@ public partial class SettingsWindow : Window
         try
         {
             var updated = _settings.Current.Clone();
-            updated.ApiKeyEncrypted = SettingsStore.ProtectApiKey(key);
+            updated.ApiKeyEncrypted = _settings.ProtectApiKey(key);
             updated.PrimaryLanguage = LanguageBox.SelectedItem as string ?? "English";
             updated.Hotkey = _selectedHotkey;
             updated.ActivationMode = ToggleRadio.IsChecked == true ? ActivationMode.Toggle : ActivationMode.Hold;

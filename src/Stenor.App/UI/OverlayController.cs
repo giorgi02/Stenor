@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Threading;
+using Stenor.Interfaces;
 using Stenor.Services;
 
 namespace Stenor.UI;
@@ -8,7 +9,7 @@ namespace Stenor.UI;
 /// Owns the overlay window lifetime and marshals state changes from background threads onto
 /// the UI thread. Done/error states auto-hide after 1 s / 3 s.
 /// </summary>
-public sealed class OverlayController
+public sealed class OverlayController : IDictationOverlay
 {
     private readonly Logger _log;
     private OverlayWindow? _window;

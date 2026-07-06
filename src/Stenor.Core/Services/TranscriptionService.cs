@@ -14,6 +14,7 @@ public sealed class TranscriptionService : IDisposable
 {
     public const string Model = "gemini-3.1-flash-lite";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly Lazy<string> PromptTemplate = new(LoadPromptTemplate);
 
     private readonly Logger _log;
     private readonly SettingsStore _settings;
@@ -111,10 +112,18 @@ public sealed class TranscriptionService : IDisposable
         var languageHint = primaryLanguage is "Other / Auto-detect"
             ? "Detect the spoken language automatically."
             : $"The speaker most likely speaks {primaryLanguage}. The audio may also contain other languages - transcribe whatever language is actually spoken.";
-        return "Transcribe this audio verbatim into clean written text. " +
-               "Remove filler words (um, uh, ეე). Add proper punctuation and capitalization. " +
-               "Output ONLY the transcribed text, nothing else - no preamble, no quotes, no markdown. " +
-               languageHint;
+        return PromptTemplate.Value.Replace("{languageHint}", languageHint);
+    }
+
+    /// <summary>Loads Prompts/TranscriptionPrompt.md, embedded in the assembly so the
+    /// single-exe publish carries it with no loose files.</summary>
+    private static string LoadPromptTemplate()
+    {
+        using var stream = typeof(TranscriptionService).Assembly
+            .GetManifestResourceStream("Stenor.Prompts.TranscriptionPrompt.md")
+            ?? throw new InvalidOperationException("Embedded resource 'Stenor.Prompts.TranscriptionPrompt.md' is missing.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().Trim();
     }
 
     private static string ExtractText(GenerateContentResponse response)

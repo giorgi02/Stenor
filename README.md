@@ -15,11 +15,11 @@
 
 ```powershell
 # ჩვეულებრივი აწყობა
-dotnet build src/Stenor/Stenor.csproj -c Release
+dotnet build Stenor.slnx -c Release
 
 # საპროდაქშენო publish (self-contained, ReadyToRun)
-dotnet publish src/Stenor/Stenor.csproj -c Release -r win-x64 --self-contained
-# → src/Stenor/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe
+dotnet publish src/Stenor.App/Stenor.App.csproj -c Release -r win-x64 --self-contained
+# → src/Stenor.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe
 ```
 
 აწყობა გაფრთხილებების (warnings) გარეშეა და ამას `TreatWarningsAsErrors` აკონტროლებს.

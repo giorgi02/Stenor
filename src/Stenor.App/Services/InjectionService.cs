@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Stenor.Interfaces;
 using Stenor.Interop;
 
 namespace Stenor.Services;
@@ -14,7 +15,7 @@ namespace Stenor.Services;
 /// the paste chord. An optional per-character KEYEVENTF_UNICODE fallback handles apps that
 /// block paste. Limitation (UIPI): a non-elevated Stenor cannot inject into elevated windows.
 /// </summary>
-public sealed class InjectionService
+public sealed class InjectionService : ITextInjector
 {
     private static readonly TimeSpan ClipboardRestoreDelay = TimeSpan.FromMilliseconds(300);
 

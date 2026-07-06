@@ -1,5 +1,6 @@
 using System.IO;
 using NAudio.CoreAudioApi;
+using Stenor.Interfaces;
 using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Utils;
 using NAudio.Wave;
@@ -18,7 +19,7 @@ namespace Stenor.Services;
 /// The device is captured at its native shared-mode format and converted on the fly
 /// (downmix to mono, WDL resample to 16 kHz) so only the small output WAV is buffered.
 /// </summary>
-public sealed class RecorderService : IDisposable
+public sealed class RecorderService : IRecorderService, IDisposable
 {
     public static readonly TimeSpan MaxRecordingDuration = TimeSpan.FromMinutes(5);
 

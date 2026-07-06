@@ -3,13 +3,14 @@ using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using H.NotifyIcon;
 using H.NotifyIcon.Core;
+using Stenor.Interfaces;
 using Stenor.Models;
 using Stenor.Services;
 
 namespace Stenor.UI;
 
 /// <summary>System tray icon with the Settings / activation-mode / quit menu.</summary>
-public sealed class TrayIcon : IDisposable
+public sealed class TrayIcon : ITrayNotifier, IDisposable
 {
     private readonly Logger _log;
     private TaskbarIcon? _icon;

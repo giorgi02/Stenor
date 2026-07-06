@@ -1,14 +1,14 @@
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+using Stenor.Interfaces;
 using Stenor.Models;
 
 namespace Stenor.Services;
 
 /// <summary>
 /// Persists settings as plaintext JSON at %APPDATA%\Stenor\settings.json, with the API key
-/// encrypted via DPAPI (CurrentUser scope). The decrypted key never touches disk or logs.
+/// encrypted via <see cref="ISecretProtector"/> (DPAPI in the Windows app). The decrypted key
+/// never touches disk or logs.
 /// </summary>
 public sealed class SettingsStore
 {
@@ -19,15 +19,17 @@ public sealed class SettingsStore
     };
 
     private readonly Logger _log;
+    private readonly ISecretProtector _protector;
     private readonly object _sync = new();
     private readonly string _directory;
     private readonly string _file;
 
     public event Action? Changed;
 
-    public SettingsStore(Logger log)
+    public SettingsStore(Logger log, ISecretProtector protector)
     {
         _log = log;
+        _protector = protector;
         _directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Stenor");
         _file = Path.Combine(_directory, "settings.json");
@@ -91,8 +93,7 @@ public sealed class SettingsStore
         }
         try
         {
-            var plain = ProtectedData.Unprotect(Convert.FromBase64String(encrypted), null, DataProtectionScope.CurrentUser);
-            return Encoding.UTF8.GetString(plain);
+            return _protector.Unprotect(encrypted);
         }
         catch (Exception ex)
         {
@@ -101,9 +102,5 @@ public sealed class SettingsStore
         }
     }
 
-    public static string ProtectApiKey(string apiKey)
-    {
-        var cipher = ProtectedData.Protect(Encoding.UTF8.GetBytes(apiKey), null, DataProtectionScope.CurrentUser);
-        return Convert.ToBase64String(cipher);
-    }
+    public string ProtectApiKey(string apiKey) => _protector.Protect(apiKey);
 }

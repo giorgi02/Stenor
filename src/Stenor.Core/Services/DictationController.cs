@@ -1,5 +1,5 @@
+using Stenor.Interfaces;
 using Stenor.Models;
-using Stenor.UI;
 
 namespace Stenor.Services;
 
@@ -27,12 +27,12 @@ public sealed class DictationController
 
     private readonly Logger _log;
     private readonly SettingsStore _settings;
-    private readonly HotkeyService _hotkeys;
-    private readonly RecorderService _recorder;
+    private readonly IHotkeyService _hotkeys;
+    private readonly IRecorderService _recorder;
     private readonly TranscriptionService _transcription;
-    private readonly InjectionService _injection;
-    private readonly OverlayController _overlay;
-    private readonly TrayIcon _tray;
+    private readonly ITextInjector _injection;
+    private readonly IDictationOverlay _overlay;
+    private readonly ITrayNotifier _tray;
 
     private readonly object _gate = new();
     private State _state = State.Idle;
@@ -41,12 +41,12 @@ public sealed class DictationController
     public DictationController(
         Logger log,
         SettingsStore settings,
-        HotkeyService hotkeys,
-        RecorderService recorder,
+        IHotkeyService hotkeys,
+        IRecorderService recorder,
         TranscriptionService transcription,
-        InjectionService injection,
-        OverlayController overlay,
-        TrayIcon tray)
+        ITextInjector injection,
+        IDictationOverlay overlay,
+        ITrayNotifier tray)
     {
         _log = log;
         _settings = settings;

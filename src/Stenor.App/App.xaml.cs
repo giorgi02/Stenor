@@ -1,5 +1,6 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using Stenor.Interfaces;
 using Stenor.Services;
 using Stenor.UI;
 using Velopack;
@@ -112,14 +113,18 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
         services.AddSingleton(log);
+        services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<SettingsStore>();
         services.AddSingleton<StartupManager>();
         services.AddSingleton<HotkeyService>();
+        services.AddSingleton<IHotkeyService>(sp => sp.GetRequiredService<HotkeyService>());
         services.AddSingleton<RecorderService>();
+        services.AddSingleton<IRecorderService>(sp => sp.GetRequiredService<RecorderService>());
         services.AddSingleton<TranscriptionService>();
-        services.AddSingleton<InjectionService>();
-        services.AddSingleton<OverlayController>();
+        services.AddSingleton<ITextInjector, InjectionService>();
+        services.AddSingleton<IDictationOverlay, OverlayController>();
         services.AddSingleton<TrayIcon>();
+        services.AddSingleton<ITrayNotifier>(sp => sp.GetRequiredService<TrayIcon>());
         services.AddSingleton<DictationController>();
         services.AddTransient<SettingsWindow>();
         return services.BuildServiceProvider();

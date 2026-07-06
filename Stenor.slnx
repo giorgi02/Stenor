@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Stenor/Stenor.csproj" />
+    <Project Path="src/Stenor.App/Stenor.App.csproj" />
+    <Project Path="src/Stenor.Core/Stenor.Core.csproj" />
   </Folder>
 </Solution>

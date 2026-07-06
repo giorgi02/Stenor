@@ -1,6 +1,8 @@
 using System.Threading.Channels;
+using Stenor.Interfaces;
 using Stenor.Interop;
 using Stenor.Models;
+using Stenor.UI;
 
 namespace Stenor.Services;
 
@@ -18,7 +20,7 @@ namespace Stenor.Services;
 /// <see cref="Released"/> with the held duration on hotkey up. The controller maps these to
 /// Hold/Toggle behavior.
 /// </summary>
-public sealed class HotkeyService : IDisposable
+public sealed class HotkeyService : IHotkeyService, IDisposable
 {
     private readonly record struct KeyEvent(int Vk, bool Down);
 
@@ -120,7 +122,7 @@ public sealed class HotkeyService : IDisposable
         // Only swallow when the hotkey is a real combo whose main key is a printable/non-modifier
         // key. Bare modifiers (default Right Ctrl) must pass through to the OS untouched.
         Volatile.Write(ref _swallowCombo, mods != 0 && !HotkeySpec.IsModifierKey(spec.VirtualKey) ? 1 : 0);
-        _log.Info($"Hotkey set to '{spec.DisplayString}'.");
+        _log.Info($"Hotkey set to '{HotkeyDisplay.Describe(spec)}'.");
     }
 
     // ------------------------------------------------------------ hook thread
