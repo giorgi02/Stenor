@@ -10,9 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Prompts\TranscriptionPrompt.md">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
+    <EmbeddedResource Include="Prompts\TranscriptionPrompt.md" />
   </ItemGroup>
 
   <ItemGroup>

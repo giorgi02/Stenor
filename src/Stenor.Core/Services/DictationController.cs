@@ -127,13 +127,9 @@ public sealed class DictationController
 
     private void OnRecorderFailed(string message)
     {
-        lock (_gate)
+        if (!TryTransition(State.Recording, State.Idle))
         {
-            if (_state != State.Recording)
-            {
-                return;
-            }
-            _state = State.Idle;
+            return;
         }
         _overlay.ShowError(message);
         _tray.ShowError("Stenor", message);
@@ -143,21 +139,14 @@ public sealed class DictationController
 
     private void StartRecording()
     {
-        lock (_gate)
+        if (!TryTransition(State.Idle, State.Recording))
         {
-            if (_state != State.Idle)
-            {
-                return;
-            }
-            _state = State.Recording;
+            return;
         }
 
         if (_settings.GetApiKey() is null)
         {
-            lock (_gate)
-            {
-                _state = State.Idle;
-            }
+            SetState(State.Idle);
             _overlay.ShowError("Add your Gemini API key in Settings.");
             _tray.ShowError("Stenor", "No API key configured. Open Settings from the tray icon.");
             return;
@@ -170,10 +159,7 @@ public sealed class DictationController
         }
         catch (Exception ex)
         {
-            lock (_gate)
-            {
-                _state = State.Idle;
-            }
+            SetState(State.Idle);
             _log.Error("Recording could not be started.", ex);
             _overlay.ShowError("Microphone unavailable.");
             _tray.ShowError("Stenor", "Could not start recording - check your microphone.");
@@ -182,13 +168,9 @@ public sealed class DictationController
 
     private void CancelRecording()
     {
-        lock (_gate)
+        if (!TryTransition(State.Recording, State.Idle))
         {
-            if (_state != State.Recording)
-            {
-                return;
-            }
-            _state = State.Idle;
+            return;
         }
         _recorder.Cancel();
         _overlay.Hide();
@@ -196,13 +178,9 @@ public sealed class DictationController
 
     private async Task StopAndTranscribeAsync()
     {
-        lock (_gate)
+        if (!TryTransition(State.Recording, State.Transcribing))
         {
-            if (_state != State.Recording)
-            {
-                return;
-            }
-            _state = State.Transcribing;
+            return;
         }
 
         try
@@ -210,10 +188,7 @@ public sealed class DictationController
             var wav = _recorder.Stop();
             if (wav is null || wav.Length < MinWavBytes)
             {
-                lock (_gate)
-                {
-                    _state = State.Idle;
-                }
+                SetState(State.Idle);
                 _overlay.Hide();
                 return;
             }
@@ -238,28 +213,19 @@ public sealed class DictationController
             }
             catch (OperationCanceledException)
             {
-                lock (_gate)
-                {
-                    _state = State.Idle;
-                }
+                SetState(State.Idle);
                 _overlay.Hide();
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(text))
             {
-                lock (_gate)
-                {
-                    _state = State.Idle;
-                }
+                SetState(State.Idle);
                 _overlay.ShowError("No speech detected.");
                 return;
             }
 
-            lock (_gate)
-            {
-                _state = State.Injecting;
-            }
+            SetState(State.Injecting);
             await _injection
                 .InjectAsync(text, _settings.Current.UseUnicodeTypingFallback)
                 .ConfigureAwait(false);
@@ -317,6 +283,29 @@ public sealed class DictationController
         lock (_gate)
         {
             return _state;
+        }
+    }
+
+    private void SetState(State state)
+    {
+        lock (_gate)
+        {
+            _state = state;
+        }
+    }
+
+    /// <summary>Atomically moves <paramref name="from"/> → <paramref name="to"/>; false when
+    /// the machine is in any other state (the trigger is then ignored).</summary>
+    private bool TryTransition(State from, State to)
+    {
+        lock (_gate)
+        {
+            if (_state != from)
+            {
+                return false;
+            }
+            _state = to;
+            return true;
         }
     }
 }

@@ -11,7 +11,7 @@ dotnet publish src/Stenor.App/Stenor.App.csproj -c Release -r win-x64 --self-con
 ```
 
 - Publish output: `src/Stenor.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe`
-- No test project; verification is the manual checklist in README.md plus a smoke run
+- No test project; verification is the manual checklist in docs/manual-checklist.md plus a smoke run
   (launch exe → check `%APPDATA%\Stenor\logs\stenor.log` for "Stenor started", tray icon, quit via tray).
 - **NuGet:** the machine-wide config has a dead feed (`nuget.lb.ge`). The repo-root
   `NuGet.config` (`<clear />` + nuget.org) must stay, or restores fail.

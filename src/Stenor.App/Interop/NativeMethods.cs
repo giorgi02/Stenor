@@ -120,7 +120,7 @@ internal static class NativeMethods
         public uint type;
         public InputUnion U;
 
-        public static int Size => Marshal.SizeOf<INPUT>();
+        public static readonly int Size = Marshal.SizeOf<INPUT>();
     }
 
     [DllImport("user32.dll", SetLastError = true)]
