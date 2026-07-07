@@ -68,7 +68,10 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
    via overlay + tray balloon; global handlers in `App.xaml.cs` log and continue.
 7. Keep the build **warning-clean** — `TreatWarningsAsErrors` is on.
 8. Settings window is **destroyed on close** (never hidden); `App.TrimWorkingSet()` runs after
-   close and after startup to hold the <70 MB idle RAM target (measured ~6 MB WS idle).
+   startup, after settings close, and ~30 s after each dictation cycle (scheduled via
+   `App.ScheduleTrim`; `DictationController.DictationStarted` cancels a pending trim so the
+   blocking GC never fires mid-recording) to hold the <70 MB idle RAM target (measured ~6 MB
+   WS idle).
 
 ## Gemini API notes (verified against the SDK, v1.12.0)
 

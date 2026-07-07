@@ -38,6 +38,14 @@ public sealed class DictationController
     private State _state = State.Idle;
     private CancellationTokenSource? _transcribeCts;
 
+    /// <summary>Raised when recording has actually started (recorder running, overlay shown).</summary>
+    public event Action? DictationStarted;
+
+    /// <summary>Raised when a stop-and-transcribe cycle has fully finished (success, failure,
+    /// or cancellation) and the machine is back in Idle. Not raised for tap discards or
+    /// recorder failures - those paths allocate almost nothing.</summary>
+    public event Action? DictationCompleted;
+
     public DictationController(
         Logger log,
         SettingsStore settings,
@@ -156,6 +164,7 @@ public sealed class DictationController
         {
             _recorder.Start();
             _overlay.ShowRecording(() => _recorder.CurrentLevel);
+            RaiseSafely(DictationStarted, nameof(DictationStarted));
         }
         catch (Exception ex)
         {
@@ -253,6 +262,19 @@ public sealed class DictationController
                 _transcribeCts?.Dispose();
                 _transcribeCts = null;
             }
+            RaiseSafely(DictationCompleted, nameof(DictationCompleted));
+        }
+    }
+
+    private void RaiseSafely(Action? handler, string name)
+    {
+        try
+        {
+            handler?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"{name} handler failed.", ex);
         }
     }
 

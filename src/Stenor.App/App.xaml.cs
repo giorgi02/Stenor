@@ -24,6 +24,7 @@ public partial class App : Application
     private ServiceProvider? _services;
     private Logger? _log;
     private SettingsWindow? _settingsWindow;
+    private CancellationTokenSource? _trimCts;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -80,7 +81,13 @@ public partial class App : Application
             _services.GetRequiredService<StartupManager>().Apply(settings.Current.LaunchAtStartup);
         };
 
-        _services.GetRequiredService<DictationController>().Initialize();
+        var controller = _services.GetRequiredService<DictationController>();
+        controller.Initialize();
+        // A dictation cycle inflates the working set (WAV buffers, base64 request, first-use
+        // WPF/HTTP state); trim shortly after it ends. Cancel while recording so the blocking
+        // GC never pauses the keyboard-hook thread mid-dictation.
+        controller.DictationStarted += CancelPendingTrim;
+        controller.DictationCompleted += () => ScheduleTrim(TimeSpan.FromSeconds(30));
 
         // Warm up the capture device off the UI thread so the first hotkey press is instant.
         var recorder = _services.GetRequiredService<RecorderService>();
@@ -95,11 +102,41 @@ public partial class App : Application
         _log.Info("Stenor started.");
 
         // Once startup settles, return unused pages to the OS so the idle footprint stays small.
+        ScheduleTrim(TimeSpan.FromSeconds(4));
+    }
+
+    /// <summary>Schedules a working-set trim after <paramref name="delay"/>. A newer schedule
+    /// or <see cref="CancelPendingTrim"/> supersedes any pending one.</summary>
+    private void ScheduleTrim(TimeSpan delay)
+    {
+        var cts = new CancellationTokenSource();
+        var token = cts.Token; // captured now: cts may be disposed by a later call before the task runs
+        var previous = Interlocked.Exchange(ref _trimCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
         Task.Run(async () =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(4)).ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(delay, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (token.IsCancellationRequested)
+            {
+                return; // superseded while the delay was running
+            }
             TrimWorkingSet();
         });
+    }
+
+    private void CancelPendingTrim()
+    {
+        var previous = Interlocked.Exchange(ref _trimCts, null);
+        previous?.Cancel();
+        previous?.Dispose();
     }
 
     /// <summary>Compacts the GC heap and trims the working set. Trimmed pages reload on demand,
@@ -149,11 +186,7 @@ public partial class App : Application
             _settingsWindow.Closed += (_, _) =>
             {
                 _settingsWindow = null; // destroyed, not hidden
-                Task.Run(async () =>
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
-                    TrimWorkingSet(); // reclaim the WPF memory the window used
-                });
+                ScheduleTrim(TimeSpan.FromSeconds(1)); // reclaim the WPF memory the window used
             };
             _settingsWindow.Show();
             _settingsWindow.Activate();
