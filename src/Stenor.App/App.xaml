@@ -4,15 +4,15 @@
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
 
-        <!-- Dark palette shared by Settings + Overlay -->
-        <SolidColorBrush x:Key="BgBrush" Color="#17171B" />
-        <SolidColorBrush x:Key="ControlBrush" Color="#26262E" />
-        <SolidColorBrush x:Key="ControlHoverBrush" Color="#2E2E38" />
-        <SolidColorBrush x:Key="EdgeBrush" Color="#3A3A44" />
-        <SolidColorBrush x:Key="TextBrush" Color="#EDEDF0" />
-        <SolidColorBrush x:Key="MutedBrush" Color="#9B9BA3" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#A78BFA" />
-        <SolidColorBrush x:Key="AccentHoverBrush" Color="#B9A3FB" />
+        <!-- Dark palette shared by Settings + Overlay; navy/teal tones derived from the app logo -->
+        <SolidColorBrush x:Key="BgBrush" Color="#12181E" />
+        <SolidColorBrush x:Key="ControlBrush" Color="#1C2630" />
+        <SolidColorBrush x:Key="ControlHoverBrush" Color="#243141" />
+        <SolidColorBrush x:Key="EdgeBrush" Color="#2F4356" />
+        <SolidColorBrush x:Key="TextBrush" Color="#E8EEF2" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#8FA5B5" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#2EA4C2" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#49B9D4" />
         <SolidColorBrush x:Key="DangerBrush" Color="#F87171" />
         <SolidColorBrush x:Key="OkBrush" Color="#4ADE80" />
 
@@ -115,7 +115,7 @@
 
         <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource DarkButton}">
             <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-            <Setter Property="Foreground" Value="#17171B" />
+            <Setter Property="Foreground" Value="#0E1A22" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -193,7 +193,7 @@
                                               TextElement.Foreground="{TemplateBinding Foreground}" />
                             <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}"
                                    Placement="Bottom" AllowsTransparency="True" StaysOpen="False">
-                                <Border Background="#26262E" BorderBrush="{StaticResource EdgeBrush}"
+                                <Border Background="{StaticResource ControlBrush}" BorderBrush="{StaticResource EdgeBrush}"
                                         BorderThickness="1" CornerRadius="8" Margin="0,4,0,0"
                                         MinWidth="{TemplateBinding ActualWidth}"
                                         MaxHeight="240">

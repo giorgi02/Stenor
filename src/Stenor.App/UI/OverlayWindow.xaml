@@ -12,10 +12,10 @@
         ResizeMode="NoResize"
         SizeToContent="WidthAndHeight">
     <Window.Resources>
-        <SolidColorBrush x:Key="AccentBrush" Color="#A78BFA" />
-        <SolidColorBrush x:Key="MutedBrush" Color="#9B9BA3" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#2EA4C2" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#8FA5B5" />
         <Style x:Key="StatusText" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#EDEDF0" />
+            <Setter Property="Foreground" Value="#E8EEF2" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontFamily" Value="Segoe UI" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -51,7 +51,7 @@
         </Style>
     </Window.Resources>
 
-    <Border CornerRadius="17" Background="#F21C1C22" Padding="16,11" Margin="12">
+    <Border CornerRadius="17" Background="#F2141C24" Padding="16,11" Margin="12">
         <Border.Effect>
             <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.45" />
         </Border.Effect>
