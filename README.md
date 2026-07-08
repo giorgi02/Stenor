@@ -7,16 +7,20 @@
 C# / .NET 10 + WPF; ცხოვრობს სისტემურ ტრეიში (taskbar-ზე ფანჯარა არ აქვს). მოდელი:
 `gemini-3.1-flash-lite`. ცივი სტარტი ≈ 1.2 წმ, უქმე რეჟიმში working set ≈ 6 MB.
 
-## აწყობა და გამოქვეყნება
+## დაყენება და განახლება
 
-```powershell
-# ჩვეულებრივი აწყობა
-dotnet build Stenor.slnx -c Release
+1. **გადმოწერა** — [უახლესი რელიზიდან](https://github.com/giorgi02/Stenor/releases/latest)
+   ჩამოტვირთე `Stenor-win-Setup.exe`.
+2. **დაყენება** — გაუშვი. ინსტალერი ხელმოუწერელია, ამიტომ SmartScreen-მა შეიძლება
+   გაგაფრთხილოს — დააჭირე **More info → Run anyway**. აპი ჯდება `%LocalAppData%\Stenor`-ში,
+   უჩნდება Start Menu-ს მალსახმობი და მაშინვე ეშვება (ტრეიში).
+3. **განახლებები ავტომატურია** — ყოველ გაშვებაზე Stenor ფონურად ამოწმებს ახალ ვერსიას,
+   ჩუმად ჩამოტვირთავს და **მომდევნო გაშვებაზე** აყენებს. რადგან აპი ტრეიში მუდმივად ზის,
+   განახლება რეალურად მაშინ დაჯდება, როცა ტრეიდან გათიშავ (*Quit*) და თავიდან გაუშვებ,
+   ან კომპიუტერს გადატვირთავ. ცალკე არაფრის გაკეთება არ გჭირდება.
 
-# საპროდაქშენო publish (self-contained, ReadyToRun)
-dotnet publish src/Stenor.App/Stenor.App.csproj -c Release -r win-x64 --self-contained
-# → src/Stenor.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe
-```
+წაშლა: **Settings → Apps → Stenor**. შენი პარამეტრები (`%APPDATA%\Stenor`) წაშლისას
+ხელუხლებელი რჩება.
 
 ## პირველი გაშვება
 
