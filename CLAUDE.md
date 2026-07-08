@@ -12,9 +12,10 @@ pwsh scripts/pack.ps1                                     # Velopack installer �
 ```
 
 - Publish output: `src/Stenor.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe`
-- Releases/auto-update: Velopack + GitHub Releases feed (`GithubSource` in `App.xaml.cs`);
-  runbook (version bump → pack → upload) in docs/release.md. Installer is unsigned —
-  SmartScreen warns on first run (known limitation).
+- Releases/auto-update: Velopack + GitHub Releases feed (`GithubSource` in `App.xaml.cs`).
+  Primary path is CI: bump `<Version>` in Stenor.App.csproj, push, then trigger the
+  `Release` workflow by hand (GitHub → Actions → Run workflow; `.github/workflows/release.yml`,
+  `workflow_dispatch`) — it packs + uploads the release. Manual fallback runbook in docs/release.md. Installer is unsigned — SmartScreen warns on first run (known limitation).
 - No test project; verification is the manual checklist in docs/manual-checklist.md plus a smoke run
   (launch exe → check `%APPDATA%\Stenor\logs\stenor.log` for "Stenor started", tray icon, quit via tray).
 - **NuGet:** the machine-wide config has a dead feed (`nuget.lb.ge`). The repo-root

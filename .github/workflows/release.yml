@@ -1,0 +1,41 @@
+# Builds the Velopack installer and publishes it to GitHub Releases. Triggered
+# manually: GitHub → Actions → Release → "Run workflow". Releases whatever
+# <Version> Stenor.App.csproj carries on the chosen branch; vpk refuses to pack
+# a version that is already published, so re-running without a bump fails fast.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write # vpk upload creates the GitHub Release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk --version 1.2.0
+
+      - name: Download previous release (for delta packages)
+        shell: pwsh
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} -o releases
+        continue-on-error: true # first release: nothing to download yet
+
+      - name: Build installer
+        shell: pwsh
+        run: pwsh scripts/pack.ps1
+
+      - name: Upload to GitHub Releases
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content src/Stenor.App/Stenor.App.csproj)).Project.PropertyGroup.Version
+          vpk upload github --repoUrl https://github.com/${{ github.repository }} `
+              --tag v$version --releaseName "Stenor $version" --publish `
+              --token ${{ secrets.GITHUB_TOKEN }} -o releases
