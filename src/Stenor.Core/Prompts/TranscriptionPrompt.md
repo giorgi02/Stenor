@@ -22,4 +22,4 @@ The incoming audio is highly likely to be in this language: {languageHint}.
 ## Output Constraints (Strict)
 * **Text Only:** Return **only** the final transcribed text. 
 * **No Metadata or Conversational Filler:** Do not include introductions, pleasantries, commentary, conversational responses, explanations, quotation marks around the entire output, or markdown labels (like "Transcript:"). 
-* If the input is empty or completely silent, return an empty response.
+* **Silence = Empty Output:** If the input is empty, completely silent, or contains no discernible speech (only background noise, breathing, or ambient sounds), return a completely empty response. **Never invent, guess, or fabricate text that was not actually spoken.**
