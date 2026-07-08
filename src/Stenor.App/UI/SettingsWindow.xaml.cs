@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Navigation;
+using Stenor.Interop;
 using Stenor.Models;
 using Stenor.Services;
 
@@ -28,6 +29,7 @@ public partial class SettingsWindow : Window
     private bool _capturingHotkey;
     private bool _syncingKeyBoxes;
     private CancellationTokenSource? _testCts;
+    private nint _taskbarIconHandle;
 
     public SettingsWindow(SettingsStore settings, TranscriptionService transcription,
         HotkeyService hotkeys, Logger log)
@@ -58,12 +60,23 @@ public partial class SettingsWindow : Window
         Closed += OnClosedCleanup;
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        _taskbarIconHandle = TaskbarIconOverride.Apply(this, _log);
+    }
+
     private void OnClosedCleanup(object? sender, EventArgs e)
     {
         _testCts?.Cancel();
         if (_capturingHotkey)
         {
             EndHotkeyCapture(null);
+        }
+        if (_taskbarIconHandle != 0)
+        {
+            NativeMethods.DestroyIcon(_taskbarIconHandle);
+            _taskbarIconHandle = 0;
         }
     }
 

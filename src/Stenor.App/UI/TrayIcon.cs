@@ -28,7 +28,8 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         _icon = new TaskbarIcon
         {
             ToolTipText = "Stenor — hold the hotkey to dictate",
-            IconSource = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/Stenor.ico")),
+            // Light-background variant: the plain logo is too dark to read on a dark taskbar.
+            IconSource = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/StenorTaskbar.ico")),
         };
 
         var menu = new ContextMenu();

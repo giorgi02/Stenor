@@ -190,6 +190,27 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
+    // ---------------------------------------------------------- window icons
+
+    public const uint WM_SETICON = 0x0080;
+    public const int ICON_BIG = 1;
+    public const int SM_CXICON = 11;
+    public const uint ICON_VERSION_3 = 0x00030000;
+
+    [DllImport("user32.dll")]
+    public static extern nint SendMessageW(nint hWnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern nint CreateIconFromResourceEx(byte[] presbits, uint dwResSize,
+        [MarshalAs(UnmanagedType.Bool)] bool fIcon, uint dwVer, int cxDesired, int cyDesired, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(nint hIcon);
+
     // ---------------------------------------------------------------- memory
 
     [DllImport("kernel32.dll")]

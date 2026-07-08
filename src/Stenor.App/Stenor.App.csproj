@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\Stenor.ico" />
+    <Resource Include="Assets\StenorTaskbar.ico" />
   </ItemGroup>
 
   <ItemGroup>
