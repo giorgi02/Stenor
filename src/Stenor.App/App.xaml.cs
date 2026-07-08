@@ -99,6 +99,11 @@ public partial class App : Application
         }
 
         CheckForUpdatesInBackground(settings.Current.UpdateFeedUrl);
+
+        // Off the UI thread: walks the install dir to size it, which may touch cold disk.
+        var sizeUpdater = _services.GetRequiredService<UninstallSizeUpdater>();
+        Task.Run(sizeUpdater.Refresh);
+
         _log.Info("Stenor started.");
 
         // Once startup settles, return unused pages to the OS so the idle footprint stays small.
@@ -155,6 +160,7 @@ public partial class App : Application
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<SettingsStore>();
         services.AddSingleton<StartupManager>();
+        services.AddSingleton<UninstallSizeUpdater>();
         services.AddSingleton<HotkeyService>();
         services.AddSingleton<IHotkeyService>(sp => sp.GetRequiredService<HotkeyService>());
         services.AddSingleton<RecorderService>();

@@ -45,6 +45,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 | `Stenor.App/Services/HotkeyService.cs` | `WH_KEYBOARD_LL` hook on a dedicated pump thread; raises `Pressed`/`Released(duration)` |
 | `Stenor.App/Services/RecorderService.cs` | Warm-primed WasapiCapture → 16 kHz/16-bit/mono WAV in memory; 5-min cap; device-change recovery |
 | `Stenor.App/Services/InjectionService.cs` | Clipboard backup → SendInput Ctrl+V → restore; Unicode-typing fallback |
+| `Stenor.App/Services/UninstallSizeUpdater.cs` | Rewrites uninstall-entry `EstimatedSize` as REG_DWORD at startup (Velopack writes REG_QWORD → blank Control Panel "Size") |
 | `Stenor.App/Interop/NativeMethods.cs` | All P/Invoke (hand-written, no CsWin32) |
 | `Stenor.App/UI/OverlayWindow.xaml(.cs)` | Recording pill; `WS_EX_NOACTIVATE|TOOLWINDOW`, positioned on the active monitor in raw pixels |
 | `Stenor.App/UI/SettingsWindow.xaml(.cs)` | One-page settings; new instance per open, destroyed on close |
