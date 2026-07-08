@@ -58,7 +58,7 @@
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
 
             <StackPanel x:Name="RecordingPanel" Orientation="Horizontal" Visibility="Collapsed">
-                <Ellipse x:Name="RecordingDot" Width="9" Height="9" Fill="#FF5A5F" VerticalAlignment="Center" />
+                <Ellipse Width="9" Height="9" Fill="#FF5A5F" VerticalAlignment="Center" />
                 <StackPanel x:Name="BarsPanel" Orientation="Horizontal" Margin="11,0,0,0"
                             VerticalAlignment="Center" Height="20">
                     <!-- Level bars are generated in code-behind. -->
@@ -70,7 +70,7 @@
                          Stroke="{StaticResource AccentBrush}" StrokeDashArray="6 3.5"
                          VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
                     <Ellipse.RenderTransform>
-                        <RotateTransform x:Name="SpinnerRotate" />
+                        <RotateTransform />
                     </Ellipse.RenderTransform>
                 </Ellipse>
                 <TextBlock Text="Transcribing…" Style="{StaticResource StatusText}" />

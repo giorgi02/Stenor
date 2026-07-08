@@ -47,8 +47,6 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
     public RecorderService(Logger log) => _log = log;
 
-    public bool IsRecording => _recording;
-
     /// <summary>Latest peak level (0..1) of the mono 16 kHz stream; polled by the overlay.</summary>
     public float CurrentLevel => _lastLevel;
 

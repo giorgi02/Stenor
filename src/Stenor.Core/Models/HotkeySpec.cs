@@ -17,12 +17,6 @@ public sealed class HotkeySpec
 
     public static HotkeySpec Default => new() { VirtualKey = VkRControl };
 
-    public bool HasModifiers => Ctrl || Shift || Alt || Win;
-
-    /// <summary>True when the hotkey is a lone modifier key (e.g. Right Ctrl). These are never
-    /// swallowed by the hook - the key passes through to the OS untouched.</summary>
-    public bool IsBareModifier => !HasModifiers && IsModifierKey(VirtualKey);
-
     public static bool IsModifierKey(int vk) => vk is
         0xA0 or 0xA1 or // L/R Shift
         0xA2 or 0xA3 or // L/R Ctrl
