@@ -58,6 +58,11 @@
         <CheckBox x:Name="StartupCheck" Style="{StaticResource DarkCheckBox}" Margin="0,14,0,0"
                   Content="Launch Stenor at Windows startup" />
 
+        <CheckBox x:Name="LiveTypingCheck" Style="{StaticResource DarkCheckBox}" Margin="0,10,0,0"
+                  Content="Live typing (experimental) — type while you speak" />
+        <TextBlock Text="Streams audio to Gemini Live and types each sentence as you pause. Output is rawer than the default mode and is always typed character by character (the clipboard is not used)."
+                   Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="24,4,0,0" TextWrapping="Wrap" />
+
         <TextBlock x:Name="ValidationText" Foreground="{StaticResource DangerBrush}" FontSize="12"
                    Margin="0,14,0,0" Visibility="Collapsed" TextWrapping="Wrap" />
 

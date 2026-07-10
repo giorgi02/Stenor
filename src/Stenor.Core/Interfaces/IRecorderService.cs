@@ -14,6 +14,11 @@ public interface IRecorderService
     /// <summary>Raised when capture dies mid-recording; carries a user-presentable message.</summary>
     event Action<string>? Failed;
 
+    /// <summary>Raised on the capture thread with each freshly converted chunk of raw
+    /// 16 kHz / 16-bit / mono little-endian PCM (no WAV header) while recording. Handlers
+    /// must be non-blocking (e.g. a channel TryWrite) - the capture pipeline waits on them.</summary>
+    event Action<byte[]>? PcmChunkAvailable;
+
     /// <summary>Current input level in [0..1], for the overlay's live meter.</summary>
     float CurrentLevel { get; }
 

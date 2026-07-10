@@ -44,6 +44,7 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
     public event Action? MaxDurationReached;
     public event Action<string>? Failed;
+    public event Action<byte[]>? PcmChunkAvailable;
 
     public RecorderService(Logger log) => _log = log;
 
@@ -258,6 +259,18 @@ public sealed class RecorderService : IRecorderService, IDisposable
                         }
                     }
                     _writer.WriteSamples(_drainBuffer, 0, read);
+
+                    if (PcmChunkAvailable is { } tap)
+                    {
+                        var pcm = new byte[read * 2];
+                        for (var i = 0; i < read; i++)
+                        {
+                            var sample = (short)Math.Clamp((int)(_drainBuffer[i] * 32767f), short.MinValue, short.MaxValue);
+                            pcm[i * 2] = (byte)sample;
+                            pcm[i * 2 + 1] = (byte)(sample >> 8);
+                        }
+                        tap(pcm);
+                    }
                 }
                 _lastLevel = Math.Min(1f, peak);
             }

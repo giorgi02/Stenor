@@ -10,23 +10,19 @@ namespace Stenor.Services;
 /// transcription prompt. 30 s timeout, one automatic retry on transient (5xx / network /
 /// timeout) failures. The API key and transcripts are never logged.
 /// </summary>
-public sealed class TranscriptionService : IDisposable
+public sealed class TranscriptionService
 {
     public const string Model = "gemini-3.1-flash-lite";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     private static readonly Lazy<string> PromptTemplate = new(LoadPromptTemplate);
 
     private readonly Logger _log;
-    private readonly SettingsStore _settings;
-    private readonly object _sync = new();
-    private Client? _client;
-    private string? _clientKey;
+    private readonly GeminiClientProvider _clients;
 
-    public TranscriptionService(Logger log, SettingsStore settings)
+    public TranscriptionService(Logger log, GeminiClientProvider clients)
     {
         _log = log;
-        _settings = settings;
-        _settings.Changed += InvalidateClient;
+        _clients = clients;
     }
 
     /// <summary>Thrown for failures with a user-presentable message.</summary>
@@ -35,8 +31,6 @@ public sealed class TranscriptionService : IDisposable
 
     public async Task<string> TranscribeAsync(byte[] wav, string primaryLanguage, CancellationToken ct)
     {
-        var client = GetClient() ?? throw new TranscriptionException("No API key configured. Open Settings to add one.");
-
         var content = new Content
         {
             Role = "user",
@@ -50,6 +44,10 @@ public sealed class TranscriptionService : IDisposable
 
         for (var attempt = 1; ; attempt++)
         {
+            // Fetched per attempt: a settings save mid-request invalidates the cached client,
+            // so the retry must not reuse the stale instance.
+            var client = _clients.GetClient()
+                ?? throw new TranscriptionException("No API key configured. Open Settings to add one.");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(RequestTimeout);
             try
@@ -148,39 +146,4 @@ public sealed class TranscriptionService : IDisposable
         or HttpRequestException
         or OperationCanceledException // request timeout (user cancellation is filtered by the caller)
         or IOException;
-
-    private Client? GetClient()
-    {
-        var key = _settings.GetApiKey();
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return null;
-        }
-        lock (_sync)
-        {
-            if (_client is null || _clientKey != key)
-            {
-                _client?.Dispose();
-                _client = new Client(apiKey: key);
-                _clientKey = key;
-            }
-            return _client;
-        }
-    }
-
-    private void InvalidateClient()
-    {
-        lock (_sync)
-        {
-            _client?.Dispose();
-            _client = null;
-            _clientKey = null;
-        }
-    }
-
-    public void Dispose()
-    {
-        _settings.Changed -= InvalidateClient;
-        InvalidateClient();
-    }
 }

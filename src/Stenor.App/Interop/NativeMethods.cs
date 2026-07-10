@@ -209,6 +209,57 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(nint hIcon);
 
+    // --------------------------------------------------------------- winsock
+    // Raw Winsock for NetworkGuard's connectivity probe. The probe must not create a managed
+    // Socket: the runtime latches the "System.Net.DisableIPv6" switch on first managed socket
+    // use, and the guard needs to decide the switch value before that happens.
+
+    public const int AF_INET = 2;
+    public const int AF_INET6 = 23;
+    public const int SOCK_STREAM = 1;
+    public const int IPPROTO_TCP = 6;
+    public const int SOCKET_ERROR = -1;
+    public const int WSAEWOULDBLOCK = 10035;
+    public const int FIONBIO = unchecked((int)0x8004667E);
+    public static readonly nint INVALID_SOCKET = -1;
+
+    /// <summary>fd_set trimmed to a single socket. Winsock's select only reads/writes
+    /// fd_count entries, so the remaining 63 slots of the native array can be omitted.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FD_SET_SINGLE
+    {
+        public uint fd_count;
+        public nint fd_socket;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TIMEVAL
+    {
+        public int tv_sec;
+        public int tv_usec;
+    }
+
+    [DllImport("ws2_32.dll", ExactSpelling = true)]
+    public static extern int WSAStartup(ushort wVersionRequested, byte[] lpWSAData);
+
+    [DllImport("ws2_32.dll", ExactSpelling = true)]
+    public static extern int WSACleanup();
+
+    [DllImport("ws2_32.dll", ExactSpelling = true, SetLastError = true)]
+    public static extern nint socket(int af, int type, int protocol);
+
+    [DllImport("ws2_32.dll", ExactSpelling = true, SetLastError = true)]
+    public static extern int ioctlsocket(nint s, int cmd, ref uint argp);
+
+    [DllImport("ws2_32.dll", ExactSpelling = true, SetLastError = true)]
+    public static extern int connect(nint s, byte[] name, int namelen);
+
+    [DllImport("ws2_32.dll", ExactSpelling = true, SetLastError = true)]
+    public static extern int select(int nfds, nint readfds, ref FD_SET_SINGLE writefds, ref FD_SET_SINGLE exceptfds, ref TIMEVAL timeout);
+
+    [DllImport("ws2_32.dll", ExactSpelling = true)]
+    public static extern int closesocket(nint s);
+
     // ---------------------------------------------------------------- memory
 
     [DllImport("kernel32.dll")]

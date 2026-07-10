@@ -49,6 +49,7 @@ public partial class App : Application
 
         _log = new Logger();
         RegisterGlobalExceptionHandlers(_log);
+        _log.Info($"Network guard: {NetworkGuard.Summary}.");
 
         _showSettingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowSettingsEventName);
         StartSettingsActivationListener();
@@ -165,7 +166,9 @@ public partial class App : Application
         services.AddSingleton<IHotkeyService>(sp => sp.GetRequiredService<HotkeyService>());
         services.AddSingleton<RecorderService>();
         services.AddSingleton<IRecorderService>(sp => sp.GetRequiredService<RecorderService>());
+        services.AddSingleton<GeminiClientProvider>();
         services.AddSingleton<TranscriptionService>();
+        services.AddSingleton<LiveTranscriptionService>();
         services.AddSingleton<ITextInjector, InjectionService>();
         services.AddSingleton<IDictationOverlay, OverlayController>();
         services.AddSingleton<TrayIcon>();

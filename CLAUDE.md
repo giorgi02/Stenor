@@ -1,7 +1,9 @@
 # Stenor — Claude Code guide
 
 Windows-only background dictation utility (Wispr Flow alternative): global hotkey → WASAPI
-recording → Gemini transcription → paste into the focused app. C# / .NET 10 + WPF, tray-only.
+recording → Gemini transcription → paste into the focused app. An opt-in "Live typing" mode
+streams audio to Gemini Live instead and types text while the user speaks.
+C# / .NET 10 + WPF, tray-only.
 
 ## Commands
 
@@ -39,13 +41,16 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 
 | File | Responsibility |
 |---|---|
-| `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard) |
-| `Stenor.Core/Services/TranscriptionService.cs` | Google.GenAI SDK, model `gemini-3.1-flash-lite`; 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder) |
+| `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard); live-typing cycle (PCM channel → send pump → sequential inject pump; batch fallback when the live session typed nothing) |
+| `Stenor.Core/Services/TranscriptionService.cs` | Batch path: `GenerateContentAsync`, model `gemini-3.1-flash-lite`; 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder) |
+| `Stenor.Core/Services/LiveTranscriptionService.cs` | Live-typing sessions: Gemini Live WebSocket, model `gemini-3.1-flash-live-preview`, `inputAudioTranscription`, auto-VAD ON (tuned start sensitivity/prefix padding); yields append-only per-utterance transcript chunks via a Channel; finish = `AudioStreamEnd` |
+| `Stenor.Core/Services/GeminiClientProvider.cs` | Single cached Google.GenAI `Client` keyed on the API key (invalidated on settings change); shared by batch + live. Replaced/invalidated clients are dropped, never disposed — disposing aborts in-flight requests |
 | `Stenor.Core/Services/SettingsStore.cs` | `%APPDATA%\Stenor\settings.json`; API key encrypted via `ISecretProtector` (DPAPI impl in App) |
 | `Stenor.App/Services/HotkeyService.cs` | `WH_KEYBOARD_LL` hook on a dedicated pump thread; raises `Pressed`/`Released(duration)` |
-| `Stenor.App/Services/RecorderService.cs` | Warm-primed WasapiCapture → 16 kHz/16-bit/mono WAV in memory; 5-min cap; device-change recovery |
+| `Stenor.App/Services/RecorderService.cs` | Warm-primed WasapiCapture → 16 kHz/16-bit/mono WAV in memory; 5-min cap; device-change recovery; `PcmChunkAvailable` raw-PCM tap (capture thread, only converted while a handler is attached) |
 | `Stenor.App/Services/InjectionService.cs` | Clipboard backup → SendInput Ctrl+V → restore; Unicode-typing fallback |
 | `Stenor.App/Services/UninstallSizeUpdater.cs` | Rewrites uninstall-entry `EstimatedSize` as REG_DWORD at startup (Velopack writes REG_QWORD → blank Control Panel "Size") |
+| `Stenor.App/Services/NetworkGuard.cs` | Startup probe for networks that advertise but blackhole IPv6 (.NET walks every AAAA at ~21 s each — every Gemini call times out; no Happy Eyeballs): TCP-443 probes the Gemini host over v6+v4 in raw Winsock, sets process-wide `System.Net.DisableIPv6` when only IPv4 works. Must run in `Program.Main` before any managed socket is created — the runtime latches that switch on first socket use (also why the probe can't use `System.Net.Sockets`; managed `Dns` is safe, verified) |
 | `Stenor.App/Interop/NativeMethods.cs` | All P/Invoke (hand-written, no CsWin32) |
 | `Stenor.App/UI/OverlayWindow.xaml(.cs)` | Recording pill; `WS_EX_NOACTIVATE|TOOLWINDOW`, positioned on the active monitor in raw pixels |
 | `Stenor.App/UI/SettingsWindow.xaml(.cs)` | One-page settings; new instance per open, destroyed on close |
@@ -75,12 +80,23 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
    blocking GC never fires mid-recording) to hold the <70 MB idle RAM target (measured ~6 MB
    WS idle).
 
-## Gemini API notes (verified against the SDK, v1.12.0)
+## Gemini API notes (verified against the SDK, v1.13.0)
 
 - `new Client(apiKey: key)`; `client.Models.GenerateContentAsync(model, content, config, ct)`.
 - Inline audio: `new Part { InlineData = new Blob { MimeType = "audio/wav", Data = bytes } }`.
 - Text out: `response.Text`, fallback = concat non-`Thought` text parts of first candidate.
 - Exceptions: `ClientError` (4xx → no retry), `ServerError` (5xx → one retry).
+- Live API: `client.Live.ConnectAsync(model, LiveConnectConfig, ct)` → `AsyncSession`
+  (`SendRealtimeInputAsync`, `ReceiveAsync` — null on graceful close, `DisposeAsync`).
+  `ConnectAsync` reads SetupComplete itself, so bad keys/configs throw right there. Audio in:
+  `Audio = new Blob { MimeType = "audio/pcm;rate=16000", Data = pcm }` (raw PCM16, no WAV
+  header). Verified against the real API (2026-07): the live model only supports **AUDIO**
+  response modality (TEXT → socket close); `InputTranscription.Text` arrives **one utterance
+  at a time when auto-VAD detects a pause** — with VAD disabled + manual ActivityStart/End the
+  whole transcript arrives only after ActivityEnd (useless for live typing), so keep auto-VAD
+  on and finish with `AudioStreamEnd = true`. `TurnComplete` fires after *every* utterance —
+  only treat it as "transcript done" once finishing. Model replies (`ModelTurn` audio) are
+  discarded; enum members are PascalCase (`Modality.Audio`).
 
 ## Documentation language
 

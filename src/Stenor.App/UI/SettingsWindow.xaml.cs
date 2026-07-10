@@ -56,6 +56,7 @@ public partial class SettingsWindow : Window
         HoldRadio.IsChecked = current.ActivationMode == ActivationMode.Hold;
         ToggleRadio.IsChecked = current.ActivationMode == ActivationMode.Toggle;
         StartupCheck.IsChecked = current.LaunchAtStartup;
+        LiveTypingCheck.IsChecked = current.LiveTyping;
 
         Closed += OnClosedCleanup;
     }
@@ -290,6 +291,7 @@ public partial class SettingsWindow : Window
             updated.Hotkey = _selectedHotkey;
             updated.ActivationMode = ToggleRadio.IsChecked == true ? ActivationMode.Toggle : ActivationMode.Hold;
             updated.LaunchAtStartup = StartupCheck.IsChecked == true;
+            updated.LiveTyping = LiveTypingCheck.IsChecked == true;
             _settings.Save(updated);
             Close();
         }
