@@ -138,71 +138,31 @@
             </Setter>
         </Style>
 
-        <Style x:Key="DarkComboBoxItem" TargetType="ComboBoxItem">
+        <!-- Closed state of the multi-select language dropdown, styled like a combo box. -->
+        <Style x:Key="DarkDropdownToggle" TargetType="ToggleButton">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="ClickMode" Value="Press" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="ComboBoxItem">
-                        <Border x:Name="Chrome" Background="Transparent" CornerRadius="6" Margin="4,1">
-                            <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" />
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chrome" Background="{StaticResource ControlBrush}"
+                                BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1"
+                                CornerRadius="8">
+                            <Grid>
+                                <ContentPresenter Margin="11,8,28,8" VerticalAlignment="Center" />
+                                <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{StaticResource MutedBrush}"
+                                      StrokeThickness="1.5" HorizontalAlignment="Right"
+                                      VerticalAlignment="Center" Margin="0,0,12,0" />
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsHighlighted" Value="True">
+                            <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Chrome" Property="Background"
                                         Value="{StaticResource ControlHoverBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="DarkComboBox" TargetType="ComboBox">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="ItemContainerStyle" Value="{StaticResource DarkComboBoxItem}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ComboBox">
-                        <Grid>
-                            <ToggleButton x:Name="ToggleButton" Focusable="False" ClickMode="Press"
-                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
-                                                      RelativeSource={RelativeSource TemplatedParent}}">
-                                <ToggleButton.Template>
-                                    <ControlTemplate TargetType="ToggleButton">
-                                        <Border x:Name="Chrome" Background="{StaticResource ControlBrush}"
-                                                BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1"
-                                                CornerRadius="8">
-                                            <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{StaticResource MutedBrush}"
-                                                  StrokeThickness="1.5" HorizontalAlignment="Right"
-                                                  VerticalAlignment="Center" Margin="0,0,12,0" />
-                                        </Border>
-                                        <ControlTemplate.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="Chrome" Property="Background"
-                                                        Value="{StaticResource ControlHoverBrush}" />
-                                            </Trigger>
-                                        </ControlTemplate.Triggers>
-                                    </ControlTemplate>
-                                </ToggleButton.Template>
-                            </ToggleButton>
-                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
-                                              Margin="11,8,28,8" VerticalAlignment="Center"
-                                              IsHitTestVisible="False"
-                                              TextElement.Foreground="{TemplateBinding Foreground}" />
-                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}"
-                                   Placement="Bottom" AllowsTransparency="True" StaysOpen="False">
-                                <Border Background="{StaticResource ControlBrush}" BorderBrush="{StaticResource EdgeBrush}"
-                                        BorderThickness="1" CornerRadius="8" Margin="0,4,0,0"
-                                        MinWidth="{TemplateBinding ActualWidth}"
-                                        MaxHeight="240">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                        <ItemsPresenter Margin="0,4" />
-                                    </ScrollViewer>
-                                </Border>
-                            </Popup>
-                        </Grid>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>

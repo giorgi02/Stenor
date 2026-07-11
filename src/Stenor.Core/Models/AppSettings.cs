@@ -13,7 +13,14 @@ public sealed class AppSettings
     /// <summary>DPAPI-protected (CurrentUser) API key, base64. Never stored or logged in plaintext.</summary>
     public string? ApiKeyEncrypted { get; set; }
 
-    public string PrimaryLanguage { get; set; } = "English";
+    /// <summary>Languages the user dictates in, as <see cref="LanguageCatalog"/> display
+    /// names. Empty means auto-detect.</summary>
+    public List<string> SpokenLanguages { get; set; } = [];
+
+    /// <summary>Legacy single-language setting; folded into <see cref="SpokenLanguages"/>
+    /// on load and no longer written.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PrimaryLanguage { get; set; }
 
     public HotkeySpec Hotkey { get; set; } = HotkeySpec.Default;
 
@@ -36,6 +43,7 @@ public sealed class AppSettings
     public AppSettings Clone() => new()
     {
         ApiKeyEncrypted = ApiKeyEncrypted,
+        SpokenLanguages = [.. SpokenLanguages],
         PrimaryLanguage = PrimaryLanguage,
         Hotkey = Hotkey.Clone(),
         ActivationMode = ActivationMode,

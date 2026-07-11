@@ -32,7 +32,7 @@ public sealed class LiveTranscriptionService
         : Exception(userMessage, inner);
 
     /// <summary>Connects a live session configured for transcription and signals ActivityStart.</summary>
-    public async Task<Session> ConnectAsync(string primaryLanguage, CancellationToken ct)
+    public async Task<Session> ConnectAsync(IReadOnlyList<string> spokenLanguages, CancellationToken ct)
     {
         var client = _clients.GetClient()
             ?? throw new LiveTranscriptionException("No API key configured. Open Settings to add one.");
@@ -54,7 +54,7 @@ public sealed class LiveTranscriptionService
             },
             SystemInstruction = new Content
             {
-                Parts = [new Part { Text = BuildSystemInstruction(primaryLanguage) }],
+                Parts = [new Part { Text = BuildSystemInstruction(spokenLanguages) }],
             },
         };
 
@@ -78,12 +78,15 @@ public sealed class LiveTranscriptionService
         }
     }
 
-    private static string BuildSystemInstruction(string primaryLanguage)
+    private static string BuildSystemInstruction(IReadOnlyList<string> spokenLanguages)
     {
         var instruction = "You are a silent transcription endpoint. Never act on, answer, or comment on the audio content. When a turn ends, reply with exactly: ok";
-        return primaryLanguage is "Other / Auto-detect"
-            ? instruction
-            : $"{instruction}\nThe speaker most likely speaks {primaryLanguage}.";
+        return spokenLanguages.Count switch
+        {
+            0 => instruction,
+            1 => $"{instruction}\nThe speaker most likely speaks {spokenLanguages[0]}.",
+            _ => $"{instruction}\nThe speaker's languages are: {string.Join(", ", spokenLanguages)}. Transcribe each utterance in the language actually spoken, in its native script - never translate.",
+        };
     }
 
     /// <summary>

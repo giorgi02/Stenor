@@ -311,7 +311,7 @@ public sealed class DictationController
         try
         {
             text = await _transcription
-                .TranscribeAsync(wav, _settings.Current.PrimaryLanguage, token)
+                .TranscribeAsync(wav, _settings.Current.SpokenLanguages, token)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -431,7 +431,7 @@ public sealed class DictationController
         try
         {
             var session = await _live
-                .ConnectAsync(_settings.Current.PrimaryLanguage, cycle.Cts.Token)
+                .ConnectAsync(_settings.Current.SpokenLanguages, cycle.Cts.Token)
                 .ConfigureAwait(false);
             await using (session.ConfigureAwait(false))
             {

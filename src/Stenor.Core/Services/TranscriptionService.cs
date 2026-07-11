@@ -29,14 +29,14 @@ public sealed class TranscriptionService
     public sealed class TranscriptionException(string userMessage, Exception? inner = null)
         : Exception(userMessage, inner);
 
-    public async Task<string> TranscribeAsync(byte[] wav, string primaryLanguage, CancellationToken ct)
+    public async Task<string> TranscribeAsync(byte[] wav, IReadOnlyList<string> spokenLanguages, CancellationToken ct)
     {
         var content = new Content
         {
             Role = "user",
             Parts =
             [
-                new Part { Text = BuildPrompt(primaryLanguage) },
+                new Part { Text = BuildPrompt(spokenLanguages) },
                 new Part { InlineData = new Blob { MimeType = "audio/wav", Data = wav } },
             ],
         };
@@ -105,11 +105,14 @@ public sealed class TranscriptionService
         }
     }
 
-    private static string BuildPrompt(string primaryLanguage)
+    private static string BuildPrompt(IReadOnlyList<string> spokenLanguages)
     {
-        var languageHint = primaryLanguage is "Other / Auto-detect"
-            ? "Detect the spoken language automatically."
-            : $"The speaker most likely speaks {primaryLanguage}. The audio may also contain other languages - transcribe whatever language is actually spoken.";
+        var languageHint = spokenLanguages.Count switch
+        {
+            0 => "Detect the spoken language automatically.",
+            1 => $"The speaker most likely speaks {spokenLanguages[0]}. The audio may also contain other languages - transcribe whatever language is actually spoken.",
+            _ => $"The speaker's languages are: {string.Join(", ", spokenLanguages)}. First determine which one of them is actually spoken in this audio, then transcribe in that language, written in its own native script. Never translate or transliterate the speech into any other language from the list. If the speech is in a language outside the list, transcribe that language instead.",
+        };
         return PromptTemplate.Value.Replace("{languageHint}", languageHint);
     }
 

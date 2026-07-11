@@ -40,8 +40,33 @@
         <TextBlock x:Name="TestResultText" FontSize="12" Margin="0,6,0,0"
                    Visibility="Collapsed" TextWrapping="Wrap" />
 
-        <TextBlock Text="Primary language" Style="{StaticResource FieldLabel}" />
-        <ComboBox x:Name="LanguageBox" Style="{StaticResource DarkComboBox}" Height="36" />
+        <TextBlock Text="Spoken languages" Style="{StaticResource FieldLabel}" />
+        <ToggleButton x:Name="LanguagesToggle" Style="{StaticResource DarkDropdownToggle}" Height="36"
+                      PreviewMouseLeftButtonDown="OnLanguagesToggleMouseDown">
+            <TextBlock x:Name="LanguagesSummary" TextTrimming="CharacterEllipsis" />
+        </ToggleButton>
+        <Popup x:Name="LanguagesPopup" PlacementTarget="{Binding ElementName=LanguagesToggle}"
+               Placement="Bottom" AllowsTransparency="True" StaysOpen="False"
+               IsOpen="{Binding IsChecked, ElementName=LanguagesToggle, Mode=TwoWay}"
+               Opened="OnLanguagesPopupOpened" Closed="OnLanguagesPopupClosed">
+            <Border Background="{StaticResource ControlBrush}" BorderBrush="{StaticResource EdgeBrush}"
+                    BorderThickness="1" CornerRadius="8" Margin="0,4,0,0"
+                    MinWidth="{Binding ActualWidth, ElementName=LanguagesToggle}">
+                <DockPanel>
+                    <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource EdgeBrush}"
+                            BorderThickness="0,1,0,0" Padding="14,7">
+                        <CheckBox x:Name="AutoDetectCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Auto-detect" Padding="6,0,0,0"
+                                  Checked="OnAutoDetectChecked" Unchecked="OnAutoDetectUnchecked" />
+                    </Border>
+                    <ScrollViewer x:Name="LanguagesScroll" VerticalScrollBarVisibility="Auto" MaxHeight="240">
+                        <StackPanel x:Name="LanguagesPanel" Margin="0,4" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Popup>
+        <TextBlock Text="The languages you dictate in — helps Gemini recognize your speech more accurately. Leave on Auto-detect if unsure."
+                   Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="2,5,0,0" TextWrapping="Wrap" />
 
         <TextBlock Text="Hotkey" Style="{StaticResource FieldLabel}" />
         <Button x:Name="HotkeyButton" Style="{StaticResource DarkButton}"

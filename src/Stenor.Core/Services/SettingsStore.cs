@@ -49,6 +49,7 @@ public sealed class SettingsStore
                     var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_file), JsonOptions);
                     if (loaded is not null)
                     {
+                        MigrateLegacyLanguage(loaded);
                         Current = loaded;
                         _log.Info("Settings loaded.");
                         return;
@@ -60,6 +61,20 @@ public sealed class SettingsStore
                 _log.Error("Failed to load settings; using defaults.", ex);
             }
             Current = new AppSettings();
+        }
+    }
+
+    /// <summary>Settings written before 1.0.4 hold a single PrimaryLanguage string;
+    /// "Other / Auto-detect" meant auto-detect, which is now the empty list.</summary>
+    private static void MigrateLegacyLanguage(AppSettings settings)
+    {
+        if (settings.PrimaryLanguage is { Length: > 0 } legacy)
+        {
+            if (settings.SpokenLanguages.Count == 0 && legacy != "Other / Auto-detect")
+            {
+                settings.SpokenLanguages.Add(legacy);
+            }
+            settings.PrimaryLanguage = null;
         }
     }
 

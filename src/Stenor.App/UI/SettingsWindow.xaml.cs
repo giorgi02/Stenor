@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Navigation;
@@ -15,19 +16,19 @@ namespace Stenor.UI;
 /// </summary>
 public partial class SettingsWindow : Window
 {
-    private static readonly string[] Languages =
-    [
-        "English", "Georgian", "Russian", "German", "French", "Spanish", "Other / Auto-detect",
-    ];
-
     private readonly SettingsStore _settings;
     private readonly TranscriptionService _transcription;
     private readonly HotkeyService _hotkeys;
     private readonly Logger _log;
 
+    private readonly Dictionary<string, CheckBox> _languageChecks = [];
+    private Border? _checkedGroupSeparator;
+
     private HotkeySpec _selectedHotkey;
     private bool _capturingHotkey;
     private bool _syncingKeyBoxes;
+    private bool _syncingLanguageChecks;
+    private DateTime _languagesPopupClosedAt;
     private CancellationTokenSource? _testCts;
     private nint _taskbarIconHandle;
 
@@ -41,16 +42,9 @@ public partial class SettingsWindow : Window
 
         InitializeComponent();
 
-        foreach (var language in Languages)
-        {
-            LanguageBox.Items.Add(language);
-        }
-
         var current = _settings.Current;
         ApiKeyBox.Password = _settings.GetApiKey() ?? string.Empty;
-        LanguageBox.SelectedItem = Languages.Contains(current.PrimaryLanguage)
-            ? current.PrimaryLanguage
-            : Languages[0];
+        BuildLanguageList(current.SpokenLanguages);
         _selectedHotkey = current.Hotkey.Clone();
         HotkeyButton.Content = HotkeyDisplay.Describe(_selectedHotkey);
         HoldRadio.IsChecked = current.ActivationMode == ActivationMode.Hold;
@@ -174,6 +168,144 @@ public partial class SettingsWindow : Window
         TestResultText.Visibility = Visibility.Visible;
     }
 
+    // ---------------------------------------------------- spoken languages
+
+    private void BuildLanguageList(IReadOnlyList<string> selected)
+    {
+        foreach (var language in LanguageCatalog.All)
+        {
+            var check = new CheckBox
+            {
+                Content = language,
+                Style = (Style)FindResource("DarkCheckBox"),
+                Padding = new Thickness(6, 0, 0, 0),
+                Margin = new Thickness(14, 5, 14, 5),
+                IsChecked = selected.Contains(language),
+            };
+            check.Checked += OnLanguageChecked;
+            check.Unchecked += OnLanguageUnchecked;
+            _languageChecks.Add(language, check);
+        }
+        AutoDetectCheck.IsChecked = SelectedLanguages().Count == 0;
+        ReorderLanguageList();
+        UpdateLanguagesSummary();
+    }
+
+    /// <summary>Catalog order with the checked group first, so both groups stay alphabetical;
+    /// a faint line separates the two groups when both are present.</summary>
+    private void ReorderLanguageList()
+    {
+        LanguagesPanel.Children.Clear();
+        foreach (var language in LanguageCatalog.All.Where(l => _languageChecks[l].IsChecked == true))
+        {
+            LanguagesPanel.Children.Add(_languageChecks[language]);
+        }
+        if (LanguagesPanel.Children.Count > 0 && LanguagesPanel.Children.Count < _languageChecks.Count)
+        {
+            _checkedGroupSeparator ??= new Border
+            {
+                Height = 1,
+                Background = (Brush)FindResource("EdgeBrush"),
+                Margin = new Thickness(10, 4, 10, 4),
+            };
+            LanguagesPanel.Children.Add(_checkedGroupSeparator);
+        }
+        foreach (var language in LanguageCatalog.All.Where(l => _languageChecks[l].IsChecked != true))
+        {
+            LanguagesPanel.Children.Add(_languageChecks[language]);
+        }
+    }
+
+    private List<string> SelectedLanguages() =>
+        [.. LanguageCatalog.All.Where(l => _languageChecks[l].IsChecked == true)];
+
+    private void UpdateLanguagesSummary()
+    {
+        var selected = SelectedLanguages();
+        LanguagesSummary.Text = selected.Count == 0 ? "Auto-detect" : string.Join(", ", selected);
+    }
+
+    private void OnLanguageChecked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingLanguageChecks)
+        {
+            return;
+        }
+        SyncLanguageChecks(() => AutoDetectCheck.IsChecked = false);
+        UpdateLanguagesSummary();
+    }
+
+    private void OnLanguageUnchecked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingLanguageChecks)
+        {
+            return;
+        }
+        if (SelectedLanguages().Count == 0)
+        {
+            SyncLanguageChecks(() => AutoDetectCheck.IsChecked = true);
+        }
+        UpdateLanguagesSummary();
+    }
+
+    private void OnAutoDetectChecked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingLanguageChecks)
+        {
+            return;
+        }
+        SyncLanguageChecks(() =>
+        {
+            foreach (var check in _languageChecks.Values)
+            {
+                check.IsChecked = false;
+            }
+        });
+        UpdateLanguagesSummary();
+    }
+
+    private void OnAutoDetectUnchecked(object sender, RoutedEventArgs e)
+    {
+        // Auto-detect only turns off by picking a language; unchecking it directly would
+        // leave nothing selected, so snap it back on.
+        if (!_syncingLanguageChecks && SelectedLanguages().Count == 0)
+        {
+            SyncLanguageChecks(() => AutoDetectCheck.IsChecked = true);
+        }
+    }
+
+    private void SyncLanguageChecks(Action sync)
+    {
+        _syncingLanguageChecks = true;
+        try
+        {
+            sync();
+        }
+        finally
+        {
+            _syncingLanguageChecks = false;
+        }
+    }
+
+    private void OnLanguagesPopupOpened(object? sender, EventArgs e)
+    {
+        ReorderLanguageList();
+        LanguagesScroll.ScrollToTop();
+    }
+
+    private void OnLanguagesPopupClosed(object? sender, EventArgs e) =>
+        _languagesPopupClosedAt = DateTime.UtcNow;
+
+    private void OnLanguagesToggleMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        // Clicking the toggle while the popup is open first closes it via StaysOpen=False;
+        // swallow that same click so it does not immediately reopen the popup.
+        if ((DateTime.UtcNow - _languagesPopupClosedAt) < TimeSpan.FromMilliseconds(250))
+        {
+            e.Handled = true;
+        }
+    }
+
     // -------------------------------------------------------- hotkey capture
 
     private void OnHotkeyButtonClick(object sender, RoutedEventArgs e)
@@ -287,7 +419,7 @@ public partial class SettingsWindow : Window
         {
             var updated = _settings.Current.Clone();
             updated.ApiKeyEncrypted = _settings.ProtectApiKey(key);
-            updated.PrimaryLanguage = LanguageBox.SelectedItem as string ?? "English";
+            updated.SpokenLanguages = SelectedLanguages();
             updated.Hotkey = _selectedHotkey;
             updated.ActivationMode = ToggleRadio.IsChecked == true ? ActivationMode.Toggle : ActivationMode.Hold;
             updated.LaunchAtStartup = StartupCheck.IsChecked == true;
