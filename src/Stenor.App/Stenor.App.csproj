@@ -12,7 +12,7 @@
     <ApplicationIcon>Assets\Stenor.ico</ApplicationIcon>
     <AssemblyName>Stenor</AssemblyName>
     <RootNamespace>Stenor</RootNamespace>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <PublishReadyToRun>true</PublishReadyToRun>
     <SelfContained>true</SelfContained>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
