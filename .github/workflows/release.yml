@@ -23,19 +23,34 @@ jobs:
       - name: Install Velopack CLI
         run: dotnet tool install -g vpk --version 1.2.0
 
-      - name: Download previous release (for delta packages)
+      - name: Download previous release (for delta packages, win channel)
         shell: pwsh
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} -o releases
         continue-on-error: true # first release: nothing to download yet
 
-      - name: Build installer
+      - name: Download previous release (for delta packages, win-lite channel)
+        shell: pwsh
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-lite -o releases
+        continue-on-error: true # first win-lite release: nothing to download yet
+
+      - name: Build installers
         shell: pwsh
         run: pwsh scripts/pack.ps1
 
-      - name: Upload to GitHub Releases
+      # Two uploads (one per channel) merge into the same vX.Y.Z release.
+      - name: Upload win channel to GitHub Releases
         shell: pwsh
         run: |
           $version = ([xml](Get-Content src/Stenor.App/Stenor.App.csproj)).Project.PropertyGroup.Version
           vpk upload github --repoUrl https://github.com/${{ github.repository }} `
-              --tag v$version --releaseName "Stenor $version" --publish `
+              --tag v$version --releaseName "Stenor $version" --publish --merge `
+              --token ${{ secrets.GITHUB_TOKEN }} -o releases
+
+      - name: Upload win-lite channel to GitHub Releases
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content src/Stenor.App/Stenor.App.csproj)).Project.PropertyGroup.Version
+          vpk upload github --repoUrl https://github.com/${{ github.repository }} `
+              --tag v$version --releaseName "Stenor $version" --publish --merge `
+              --channel win-lite `
               --token ${{ secrets.GITHUB_TOKEN }} -o releases

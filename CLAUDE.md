@@ -10,7 +10,7 @@ C# / .NET 10 + WPF, tray-only.
 ```powershell
 dotnet build Stenor.slnx -c Release                       # must stay warning-clean (TreatWarningsAsErrors)
 dotnet publish src/Stenor.App/Stenor.App.csproj -c Release -r win-x64 --self-contained   # production build
-pwsh scripts/pack.ps1                                     # Velopack installer → releases/ (needs: dotnet tool install -g vpk)
+pwsh scripts/pack.ps1                                     # Velopack installers, 2 channels: win (self-contained) + win-lite (framework-dependent, Setup installs .NET 10 Desktop Runtime if missing) → releases/ (needs: dotnet tool install -g vpk)
 ```
 
 - Publish output: `src/Stenor.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Stenor.exe`
