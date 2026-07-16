@@ -83,7 +83,7 @@ public sealed class TranscriptionService
     {
         try
         {
-            using var client = new Client(apiKey: apiKey);
+            using var client = new Client(apiKey: apiKey, clientOptions: GeminiClientProvider.Ipv4FirstClientOptions);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(15));
             var config = new GenerateContentConfig { MaxOutputTokens = 5 };

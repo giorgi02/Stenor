@@ -11,8 +11,16 @@ namespace Stenor.Services;
 /// Happy-Eyeballs fallback: it walks every AAAA answer sequentially with a ~21 s OS connect
 /// timeout each before reaching an IPv4 address — far past every request timeout in this app,
 /// so batch transcription, live typing, the key test and update checks all appear dead.
-/// The guard TCP-probes the Gemini host over both families and, only when IPv6 is unreachable
-/// while IPv4 works, sets the process-wide "System.Net.DisableIPv6" AppContext switch.
+/// The guard TCP-probes the Gemini host over both families and, whenever IPv4 works on a
+/// dual-stack answer, sets the process-wide "System.Net.DisableIPv6" AppContext switch. IPv4
+/// is preferred even when the IPv6 probe passes: the switch is latched after first socket use,
+/// so a network whose IPv6 degrades mid-session (observed 2026-07-16: probe OK at startup,
+/// blackholed two hours later) would otherwise leave the app dead until restart, and nothing
+/// this app talks to needs IPv6.
+/// Scope note: Gemini REST calls no longer depend on this guard — they dial IPv4-first per
+/// connection (GeminiClientProvider.CreateIpv4FirstHttpClient). The guard still matters for
+/// the transports that accept no custom connect logic: the Gemini Live WebSocket and the
+/// Velopack update check.
 /// It must run before anything creates a managed socket (HttpClient, ClientWebSocket, the
 /// Velopack update check): the runtime latches the switch on first socket use — which is also
 /// why the probe itself speaks raw Winsock instead of System.Net.Sockets. Managed DNS is safe:
@@ -55,13 +63,15 @@ internal static class NetworkGuard
             var v4Probe = Task.Run(() => CanConnectTcp(v4, ProbePort, ProbeTimeout));
             Task.WaitAll(v6Probe, v4Probe);
 
-            if (!v6Probe.Result && v4Probe.Result)
+            if (v4Probe.Result)
             {
                 AppContext.SetSwitch("System.Net.DisableIPv6", true);
-                Summary = "IPv6 unreachable, IPv4 OK; IPv4-only for this session";
+                Summary = v6Probe.Result
+                    ? "IPv4 OK (IPv6 also OK); IPv4-only for this session"
+                    : "IPv6 unreachable, IPv4 OK; IPv4-only for this session";
                 return;
             }
-            Summary = $"connectivity OK (IPv6={v6Probe.Result}, IPv4={v4Probe.Result}); defaults kept";
+            Summary = $"IPv4 unreachable (IPv6={v6Probe.Result}); defaults kept";
         }
         catch (Exception ex)
         {

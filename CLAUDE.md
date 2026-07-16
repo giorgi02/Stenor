@@ -44,13 +44,13 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 | `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard); live-typing cycle (PCM channel → send pump → sequential inject pump; batch fallback when the live session typed nothing) |
 | `Stenor.Core/Services/TranscriptionService.cs` | Batch path: `GenerateContentAsync`, model `gemini-3.1-flash-lite`; 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder) |
 | `Stenor.Core/Services/LiveTranscriptionService.cs` | Live-typing sessions: Gemini Live WebSocket, model `gemini-3.1-flash-live-preview`, `inputAudioTranscription`, auto-VAD ON (tuned start sensitivity/prefix padding); yields append-only per-utterance transcript chunks via a Channel; finish = `AudioStreamEnd` |
-| `Stenor.Core/Services/GeminiClientProvider.cs` | Single cached Google.GenAI `Client` keyed on the API key (invalidated on settings change); shared by batch + live. Replaced/invalidated clients are dropped, never disposed — disposing aborts in-flight requests |
+| `Stenor.Core/Services/GeminiClientProvider.cs` | Single cached Google.GenAI `Client` keyed on the API key (invalidated on settings change); shared by batch + live. Replaced/invalidated clients are dropped, never disposed — disposing aborts in-flight requests. Also owns `Ipv4FirstClientOptions`: a custom HttpClient (`SocketsHttpHandler.ConnectCallback`) that dials the last-known-good address family first (IPv4 initially; 5 s per attempt, families interleaved, success updates the sticky preference), making all Gemini REST calls immune to either family breaking mid-session — every REST `Client` (incl. the key-test throwaway) must be built with it |
 | `Stenor.Core/Services/SettingsStore.cs` | `%APPDATA%\Stenor\settings.json`; API key encrypted via `ISecretProtector` (DPAPI impl in App) |
 | `Stenor.App/Services/HotkeyService.cs` | `WH_KEYBOARD_LL` hook on a dedicated pump thread; raises `Pressed`/`Released(duration)` |
 | `Stenor.App/Services/RecorderService.cs` | Warm-primed WasapiCapture → 16 kHz/16-bit/mono WAV in memory; 5-min cap; device-change recovery; `PcmChunkAvailable` raw-PCM tap (capture thread, only converted while a handler is attached) |
 | `Stenor.App/Services/InjectionService.cs` | Clipboard backup → SendInput Ctrl+V → restore; Unicode-typing fallback |
 | `Stenor.App/Services/UninstallSizeUpdater.cs` | Rewrites uninstall-entry `EstimatedSize` as REG_DWORD at startup (Velopack writes REG_QWORD → blank Control Panel "Size") |
-| `Stenor.App/Services/NetworkGuard.cs` | Startup probe for networks that advertise but blackhole IPv6 (.NET walks every AAAA at ~21 s each — every Gemini call times out; no Happy Eyeballs): TCP-443 probes the Gemini host over v6+v4 in raw Winsock, sets process-wide `System.Net.DisableIPv6` when only IPv4 works. Must run in `Program.Main` before any managed socket is created — the runtime latches that switch on first socket use (also why the probe can't use `System.Net.Sockets`; managed `Dns` is safe, verified) |
+| `Stenor.App/Services/NetworkGuard.cs` | Startup probe for networks that advertise but blackhole IPv6 (.NET walks every AAAA at ~21 s each — every Gemini call times out; no Happy Eyeballs): TCP-443 probes the Gemini host over v6+v4 in raw Winsock, sets process-wide `System.Net.DisableIPv6` whenever IPv4 works (not only when IPv6 fails the probe — IPv6 can pass at startup and blackhole mid-session, and the latched switch can't be flipped later). Only the Live WebSocket + Velopack updater depend on it; Gemini REST self-heals per connection via `GeminiClientProvider`. Must run in `Program.Main` before any managed socket is created — the runtime latches that switch on first socket use (also why the probe can't use `System.Net.Sockets`; managed `Dns` is safe, verified) |
 | `Stenor.App/Interop/NativeMethods.cs` | All P/Invoke (hand-written, no CsWin32) |
 | `Stenor.App/UI/OverlayWindow.xaml(.cs)` | Recording pill; `WS_EX_NOACTIVATE|TOOLWINDOW`, positioned on the active monitor in raw pixels |
 | `Stenor.App/UI/SettingsWindow.xaml(.cs)` | One-page settings; new instance per open, destroyed on close |
@@ -78,7 +78,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
    startup, after settings close, and ~30 s after each dictation cycle (scheduled via
    `App.ScheduleTrim`; `DictationController.DictationStarted` cancels a pending trim so the
    blocking GC never fires mid-recording) to hold the <70 MB idle RAM target (measured ~6 MB
-   WS idle).
+   WS idle). Cold start target ≈ 1.2 s.
 
 ## Gemini API notes (verified against the SDK, v1.13.0)
 
