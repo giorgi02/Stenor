@@ -43,7 +43,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 |---|---|
 | `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard); live-typing cycle (PCM channel → send pump → sequential inject pump; batch fallback when the live session typed nothing) |
 | `Stenor.Core/Services/TranscriptionService.cs` | Batch path: `GenerateContentAsync`, model `gemini-3.1-flash-lite`; 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder) |
-| `Stenor.Core/Services/LiveTranscriptionService.cs` | Live-typing sessions: Gemini Live WebSocket, model `gemini-3.1-flash-live-preview`, `inputAudioTranscription`, auto-VAD ON (tuned start sensitivity/prefix padding); yields append-only per-utterance transcript chunks via a Channel; finish = `AudioStreamEnd` |
+| `Stenor.Core/Services/LiveTranscriptionService.cs` | Live-typing sessions: Gemini Live WebSocket, model `gemini-3.1-flash-live-preview`, `inputAudioTranscription` with ISO-639 `LanguageHints` from the selected languages (`LanguageAuto` when none — codes come from `LanguageCatalog.CodeFor`), auto-VAD ON (tuned start sensitivity/prefix padding); yields append-only per-utterance transcript chunks via a Channel; finish = `AudioStreamEnd` |
 | `Stenor.Core/Services/GeminiClientProvider.cs` | Single cached Google.GenAI `Client` keyed on the API key (invalidated on settings change); shared by batch + live. Replaced/invalidated clients are dropped, never disposed — disposing aborts in-flight requests. Also owns `Ipv4FirstClientOptions`: a custom HttpClient (`SocketsHttpHandler.ConnectCallback`) that dials the last-known-good address family first (IPv4 initially; 5 s per attempt, families interleaved, success updates the sticky preference), making all Gemini REST calls immune to either family breaking mid-session — every REST `Client` (incl. the key-test throwaway) must be built with it |
 | `Stenor.Core/Services/SettingsStore.cs` | `%APPDATA%\Stenor\settings.json`; API key encrypted via `ISecretProtector` (DPAPI impl in App) |
 | `Stenor.App/Services/HotkeyService.cs` | `WH_KEYBOARD_LL` hook on a dedicated pump thread; raises `Pressed`/`Released(duration)` |
@@ -97,6 +97,15 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
   on and finish with `AudioStreamEnd = true`. `TurnComplete` fires after *every* utterance —
   only treat it as "transcript done" once finishing. Model replies (`ModelTurn` audio) are
   discarded; enum members are PascalCase (`Modality.Audio`).
+- Live transcription config, verified against the real API (2026-07): the consumer API accepts
+  `AudioTranscriptionConfig.LanguageHints` (bare `ka` and region `ka-GE` forms both work) and
+  `LanguageAuto`; hints are ASR-level and reproducibly fix Georgian misrecognition at utterance
+  starts (the system-instruction hint alone is not enough). Dead ends checked so far — don't
+  re-explore without new evidence: `InterimInputTranscription` is never sent for this model
+  (and no enabling flag exists); `SilenceDurationMs`/`EndOfSpeechSensitivity` produce no
+  observable change (default VAD already commits utterances at ≤700 ms pauses);
+  `gemini-2.5-flash-native-audio-*` DOES stream input transcription word-by-word (append-only
+  deltas) but cannot transcribe Georgian at all, so it's unusable here.
 
 ## Documentation language
 

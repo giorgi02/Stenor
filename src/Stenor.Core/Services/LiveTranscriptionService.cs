@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Google.GenAI;
 using Google.GenAI.Types;
+using Stenor.Models;
 
 namespace Stenor.Services;
 
@@ -41,7 +42,7 @@ public sealed class LiveTranscriptionService
         {
             // The live model rejects TEXT ("response modalities (TEXT) is not supported").
             ResponseModalities = [Modality.Audio],
-            InputAudioTranscription = new AudioTranscriptionConfig(),
+            InputAudioTranscription = BuildTranscriptionConfig(spokenLanguages),
             RealtimeInputConfig = new RealtimeInputConfig
             {
                 // Catch utterance starts quickly and pad backwards so leading words survive.
@@ -76,6 +77,21 @@ public sealed class LiveTranscriptionService
             _log.Error("Live session connect failed.", ex);
             throw new LiveTranscriptionException("Could not reach Gemini Live - network error or timeout.", ex);
         }
+    }
+
+    /// <summary>Hints the ASR layer directly (the system instruction only steers the model):
+    /// selected languages become ISO-639 LanguageHints, none means explicit auto-detection.
+    /// Verified against the real API (2026-07) - hints reproducibly fix Georgian
+    /// misrecognition at utterance starts.</summary>
+    private static AudioTranscriptionConfig BuildTranscriptionConfig(IReadOnlyList<string> spokenLanguages)
+    {
+        var codes = spokenLanguages
+            .Select(LanguageCatalog.CodeFor)
+            .OfType<string>()
+            .ToList();
+        return codes.Count > 0
+            ? new AudioTranscriptionConfig { LanguageHints = new LanguageHints { LanguageCodes = codes } }
+            : new AudioTranscriptionConfig { LanguageAuto = new LanguageAuto() };
     }
 
     private static string BuildSystemInstruction(IReadOnlyList<string> spokenLanguages)

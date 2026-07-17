@@ -12,7 +12,7 @@
     <ApplicationIcon>Assets\Stenor.ico</ApplicationIcon>
     <AssemblyName>Stenor</AssemblyName>
     <RootNamespace>Stenor</RootNamespace>
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <PublishReadyToRun>true</PublishReadyToRun>
     <SelfContained>true</SelfContained>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -27,7 +27,7 @@
 
   <ItemGroup>
     <PackageReference Include="H.NotifyIcon.Wpf" Version="2.4.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageReference Include="NAudio" Version="2.3.0" />
     <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
