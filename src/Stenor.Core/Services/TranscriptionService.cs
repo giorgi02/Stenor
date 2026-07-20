@@ -40,7 +40,9 @@ public sealed class TranscriptionService
                 new Part { InlineData = new Blob { MimeType = "audio/wav", Data = wav } },
             ],
         };
-        var config = new GenerateContentConfig { Temperature = 0.2f };
+        // Temperature 0: transcription is not a creative task, and any sampling freedom shows up
+        // as invented text on quiet or ambiguous audio.
+        var config = new GenerateContentConfig { Temperature = 0f };
 
         for (var attempt = 1; ; attempt++)
         {

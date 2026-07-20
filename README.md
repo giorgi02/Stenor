@@ -1,92 +1,94 @@
 # Stenor
 
-**წერე ხმით — ნებისმიერ პროგრამაში.**
+**Write with your voice — in any application.**
 
-დაიჭირე ღილაკი, თქვი რისი დაწერაც გინდა, აუშვი — და ტექსტი მაშინვე გაჩნდება იქ, სადაც
-კურსორი გიდგას: Word-ში, ბრაუზერში, VS Code-ში, Slack-სა თუ Teams-ში. ლაპარაკი ბეჭდვაზე
-გაცილებით სწრაფია — Stenor ნათქვამს ტექსტად Google Gemini-ის დახმარებით გარდაქმნის.
+Hold a key, say what you want to write, release it — and the text appears exactly where your
+cursor is: in Word, in the browser, in VS Code, in Slack or Teams. Speaking is far faster than
+typing, and Stenor turns what you say into text with the help of Google Gemini.
 
-## რაში დაგეხმარება
+## What it gives you
 
-- **სწრაფად წერ** — წერილები, შეტყობინებები, დოკუმენტები, კომენტარები: თქვი და მზადაა,
-  ბეჭდვა აღარ გჭირდება.
-- **ყველგან მუშაობს** — ცალკე ფანჯარა არ აქვს და არ სჭირდება: სადაც ტექსტის ველია
-  ფოკუსში, ტექსტი იქ ჯდება.
-- **ქართულად და კიდევ 96 ენაზე** — ენას თავად ცნობს, შერეულ ლაპარაკსაც უგებს.
-- **ხელს არ გიშლის** — ცხოვრობს სისტემურ ტრეიში, უქმეზე თითქმის არ მოიხმარს რესურსს,
-  და მზადაა წამის ნაწილში, როგორც კი ღილაკს დააჭერ.
-- **შენი მონაცემები შენთან რჩება** — ხმა ტრანსკრიფციისთვის მხოლოდ Google Gemini-ს
-  ეგზავნება შენივე API გასაღებით; Stenor არც აუდიოს ინახავს, არც ტექსტს და არც გასაღებს
-  ლოგებში არასდროს წერს.
+- **Faster writing** — emails, messages, documents, comments: say it and it is ready, no typing
+  needed.
+- **Works everywhere** — it has no window of its own and needs none: wherever a text field has
+  focus, that is where the text lands.
+- **Georgian and 96 more languages** — it recognises the language on its own and copes with
+  mixed speech.
+- **Stays out of your way** — it lives in the system tray, consumes almost nothing while idle,
+  and is ready in a fraction of a second the moment you press the key.
+- **Your data stays with you** — audio is sent for transcription to Google Gemini only, using
+  your own API key; Stenor stores neither the audio nor the text, and never writes the key to
+  its logs.
 
-ერთადერთი, რაც დაგჭირდება, Gemini API გასაღებია — <https://aistudio.google.com/apikey>-ზე
-უფასოდ იღებ.
+The only thing you need is a Gemini API key — get one for free at
+<https://aistudio.google.com/apikey>.
 
-## დაყენება და განახლება
+## Installation and updates
 
-1. **გადმოწერა** — [უახლესი რელიზიდან](https://github.com/giorgi02/Stenor/releases/latest)
-   ჩამოტვირთე ერთ-ერთი:
-   - `Stenor-win-lite-Setup.exe` — პატარა ვარიანტი (~19 MB ინსტალერი, ~40 MB
-     დაინსტალირებული). სჭირდება [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
-     — თუ არ გიდგას, ინსტალერი თავად შემოგთავაზებს ჩამოტვირთვას.
-   - `Stenor-win-Setup.exe` — სრული ვარიანტი: ყველაფერი შიგნითაა და არაფერი სჭირდება,
-     სამაგიეროდ დაინსტალირებული ~317 MB-ს იკავებს.
-2. **დაყენება** — გაუშვი. ინსტალერი ხელმოუწერელია, ამიტომ SmartScreen-მა შეიძლება
-   გაგაფრთხილოს — დააჭირე **More info → Run anyway**. აპი ჯდება `%LocalAppData%\Stenor`-ში,
-   უჩნდება Start Menu-ს მალსახმობი და მაშინვე ეშვება (ტრეიში).
-3. **განახლებები ავტომატურია** — ყოველ გაშვებაზე Stenor ფონურად ამოწმებს ახალ ვერსიას,
-   ჩუმად ჩამოტვირთავს და **მომდევნო გაშვებაზე** აყენებს. რადგან აპი ტრეიში მუდმივად ზის,
-   განახლება რეალურად მაშინ დაჯდება, როცა ტრეიდან გათიშავ (*Quit*) და თავიდან გაუშვებ,
-   ან კომპიუტერს გადატვირთავ. ცალკე არაფრის გაკეთება არ გჭირდება.
+1. **Download** — from the [latest release](https://github.com/giorgi02/Stenor/releases/latest)
+   pick one of:
+   - `Stenor-win-lite-Setup.exe` — the small build (~19 MB installer, ~40 MB installed). It
+     requires the [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
+     — if you do not have it, the installer offers to download it for you.
+   - `Stenor-win-Setup.exe` — the full build: everything is bundled and nothing else is needed,
+     but it takes ~317 MB once installed.
+2. **Install** — run it. The installer is unsigned, so SmartScreen may warn you — click
+   **More info → Run anyway**. The app installs into `%LocalAppData%\Stenor`, gets a Start Menu
+   shortcut and starts straight away (into the tray).
+3. **Updates are automatic** — on every launch Stenor checks for a new version in the
+   background, downloads it silently and installs it **on the next launch**. Because the app
+   sits in the tray permanently, the update actually lands once you quit it from the tray
+   (*Quit*) and start it again, or reboot the machine. Nothing else is required from you.
 
-წაშლა: **Settings → Apps → Stenor**. შენი პარამეტრები (`%APPDATA%\Stenor`) წაშლისას
-ხელუხლებელი რჩება.
+To uninstall: **Settings → Apps → Stenor**. Your settings (`%APPDATA%\Stenor`) are left
+untouched by the uninstall.
 
-## პირველი გაშვება
+## First run
 
-პირველ გაშვებაზე პარამეტრების ფანჯარა თავად იხსნება — ჩასვი Gemini API გასაღები
-<https://aistudio.google.com/apikey>-დან, სურვილისამებრ დააჭირე **Test key**-ს და შეინახე.
+On the first launch the settings window opens by itself — paste in a Gemini API key from
+<https://aistudio.google.com/apikey>, optionally click **Test key**, and save.
 
-მერე კი:
+After that:
 
-1. გადადი ნებისმიერ ტექსტურ ველში.
-2. **დაიჭირე მარჯვენა Ctrl** და ილაპარაკე — ეკრანზე ჩაწერის ინდიკატორი გამოჩნდება.
-3. აუშვი — წამებში ტექსტი ფოკუსირებულ ველში ჩაჯდება.
+1. Move to any text field.
+2. **Hold Right Ctrl** and speak — a recording indicator appears on screen.
+3. Release it — within seconds the text lands in the focused field.
 
-## პარამეტრები
+## Settings
 
-ტრეის ხატულაზე ორმაგი კლიკი ან მენიუში *Settings…*:
+Double-click the tray icon, or pick *Settings…* from its menu:
 
-| პარამეტრი | ნაგულისხმევი | შენიშვნა |
+| Setting | Default | Notes |
 |---|---|---|
-| Gemini API გასაღები | — | ინახება დაშიფრული, მხოლოდ შენს კომპიუტერზე |
-| სალაპარაკო ენები | ავტოდეტექცია | რამდენიმე ენის მონიშვნა შეიძლება (მხარდაჭერილი 97 ენიდან); მხოლოდ მინიშნებაა ტრანსკრიფციისთვის — სხვა ენებზეც მუშაობს |
-| ღილაკი (hotkey) | მარჯვენა Ctrl | ცალკეული ღილაკი (მარცხენა/მარჯვენა განირჩევა) ან კომბინაცია |
-| აქტივაციის რეჟიმი | Hold | Hold = ლაპარაკობ სანამ ღილაკი გიჭირავს; Toggle = ერთი დაჭერით იწყებ, მეორეთი ამთავრებ |
-| Windows-თან ერთად გაშვება | ჩართული | |
-| Live typing (ექსპერიმენტული) | გამორთული | ტექსტი კარნახის მსვლელობისასვე იბეჭდება — წინადადება-წინადადება, საუბრის პაუზებზე; შედეგი უფრო „ნედლია", ვიდრე ჩვეულებრივ რეჟიმში |
+| Gemini API key | — | Stored encrypted, on your machine only |
+| Spoken languages | Auto-detect | Several languages can be ticked (out of the 97 supported); it is only a hint for transcription — other languages work too |
+| Hotkey | Right Ctrl | A single key (left/right are told apart) or a combination |
+| Activation mode | Hold | Hold = you speak for as long as you hold the key; Toggle = one press starts, another one ends |
+| Start with Windows | Enabled | |
+| Live typing (experimental) | Disabled | Text is typed while you dictate — sentence by sentence, at the pauses in your speech; the result is rougher than in the normal mode |
 
-რამდენიმე წვრილმანი:
+A few small details:
 
-- ჩაწერა 5 წუთზე ავტომატურად ჩერდება; ოვერლეიზე ✕ აუქმებს ჩაწერას ან ტრანსკრიფციას.
-- Stenor.exe-ის მეორედ გაშვება ახალ ინსტანციას არ ქმნის — მომუშავის პარამეტრებს ხსნის.
-- ლოგები: `%APPDATA%\Stenor\logs\` (არასდროს შეიცავს აუდიოს, ტრანსკრიპტებს ან გასაღებს).
+- Recording stops automatically after 5 minutes; ✕ on the overlay cancels the recording or the
+  transcription.
+- Starting Stenor.exe a second time does not create a new instance — it opens the settings of
+  the running one.
+- Logs: `%APPDATA%\Stenor\logs\` (they never contain audio, transcripts or the key).
 
-## ცნობილი შეზღუდვები
+## Known limitations
 
-- **ადმინისტრატორის (elevated) ფანჯარაში** ტექსტი პირდაპირ ვერ ჯდება (Windows-ის
-  შეზღუდვაა) — ტრანსკრიპტი ბუფერში რჩება ხელით Ctrl+V-სთვის; თუ პირდაპირი ჩასმა გინდა,
-  Stenor ადმინისტრატორად გაუშვი.
-- **Win** ღილაკიანი კომბინაციებისას OS-ის მალსახმობები მაინც შეიძლება ჩაირთოს.
-- **Live typing რეჟიმში** კარნახისას სხვა ფანჯარაზე გადართვა დარჩენილ ტექსტს ახალ,
-  ფოკუსირებულ ველში აგზავნის; კავშირის გაწყვეტისას უკვე დაბეჭდილი ტექსტი რჩება და
-  დანარჩენი იკარგება (თუ ჯერ არაფერი დაბეჭდილა, ჩანაწერი ავტომატურად ჩვეულებრივი
-  ტრანსკრიფციით მუშავდება).
-- ჩასმის შემდეგ ბუფერიდან მხოლოდ ტექსტი/სურათი/ფაილების სია აღდგება — აპლიკაციების კერძო
-  ფორმატები იკარგება.
+- **In elevated (administrator) windows** text cannot be inserted directly (a Windows
+  restriction) — the transcript stays on the clipboard for a manual Ctrl+V; if you want direct
+  insertion, run Stenor as administrator.
+- With combinations that involve the **Win** key, the OS shortcut may still fire.
+- **In Live typing mode**, switching to another window mid-dictation sends the remaining text
+  into the newly focused field; if the connection drops, the text already typed stays and the
+  rest is lost (if nothing has been typed yet, the recording is processed by normal
+  transcription automatically).
+- After insertion, only text/image/file-list content is restored from the clipboard —
+  application-private formats are lost.
 
-## დეველოპერებისთვის
+## For developers
 
-Stenor დაწერილია C#-ზე (.NET 10 + WPF). აწყობის ინსტრუქციები და არქიტექტურის აღწერა —
-[CLAUDE.md](CLAUDE.md); რელიზის პროცესი — [docs/release.md](docs/release.md); ხელით
-შემოწმების სია — [docs/manual-checklist.md](docs/manual-checklist.md).
+Stenor is written in C# (.NET 10 + WPF). Build instructions and the architecture description
+are in [CLAUDE.md](CLAUDE.md); the release process is in [docs/release.md](docs/release.md).

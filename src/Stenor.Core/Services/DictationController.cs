@@ -296,6 +296,16 @@ public sealed class DictationController
     /// <see cref="StopAndTranscribeAsync"/>'s try/finally.</summary>
     private async Task TranscribeAndInjectAsync(byte[] wav)
     {
+        // Never upload silence: the model answers an empty recording with invented, fluent text.
+        var speech = SpeechDetector.Analyze(wav);
+        if (!speech.HasSpeech)
+        {
+            _log.Info($"Recording contains no speech; skipping transcription ({speech}).");
+            SetState(State.Idle);
+            _overlay.ShowError("No speech detected.");
+            return;
+        }
+
         _overlay.ShowTranscribing();
         _log.Info($"Transcribing {wav.Length / 1024} KB of audio.");
 
