@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using H.NotifyIcon;
 using H.NotifyIcon.Core;
@@ -34,7 +35,11 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
 
         var menu = new ContextMenu();
 
-        var settingsItem = new MenuItem { Header = "Settings…" };
+        var settingsItem = new MenuItem
+        {
+            Header = "Settings…",
+            Icon = CreateMenuGlyph("\uE713"), // Settings gear
+        };
         settingsItem.Click += (_, _) => SettingsRequested?.Invoke();
         menu.Items.Add(settingsItem);
         menu.Items.Add(new Separator());
@@ -48,7 +53,11 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         menu.Items.Add(_toggleItem);
 
         menu.Items.Add(new Separator());
-        var quitItem = new MenuItem { Header = "Quit Stenor" };
+        var quitItem = new MenuItem
+        {
+            Header = "Quit Stenor",
+            Icon = CreateMenuGlyph("\uE7E8"), // Power button
+        };
         quitItem.Click += (_, _) => QuitRequested?.Invoke();
         menu.Items.Add(quitItem);
 
@@ -59,6 +68,18 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         _icon.ForceCreate();
         _log.Info("Tray icon created.");
     }
+
+    private static TextBlock CreateMenuGlyph(string glyph) => new()
+    {
+        Text = glyph,
+        FontFamily = new FontFamily("Segoe MDL2 Assets"),
+        FontSize = 14,
+        Width = 16,
+        Height = 16,
+        TextAlignment = TextAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        UseLayoutRounding = true,
+    };
 
     public void SetMode(ActivationMode mode)
     {
