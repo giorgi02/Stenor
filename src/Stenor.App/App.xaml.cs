@@ -25,6 +25,10 @@ public partial class App : Application
     private Logger? _log;
     private SettingsWindow? _settingsWindow;
     private CancellationTokenSource? _trimCts;
+    private UpdateManager? _updateManager;
+    private VelopackAsset? _pendingUpdate;
+    private bool _updateApplyScheduled;
+    private bool _updateCheckRunning;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -60,10 +64,13 @@ public partial class App : Application
         settings.Load();
         _services.GetRequiredService<StartupManager>().Apply(settings.Current.LaunchAtStartup);
 
+        _updateManager = CreateUpdateManager(settings.Current.UpdateFeedUrl);
         var tray = _services.GetRequiredService<TrayIcon>();
         tray.Initialize(settings.Current.ActivationMode);
         tray.SettingsRequested += OpenSettings;
         tray.QuitRequested += Shutdown;
+        tray.CheckForUpdatesRequested += () => _ = CheckForUpdatesAsync(userInitiated: true);
+        tray.RestartToUpdateRequested += RestartToApplyUpdate;
         tray.ModeChangeRequested += mode =>
         {
             var updated = settings.Current.Clone();
@@ -99,7 +106,7 @@ public partial class App : Application
             OpenSettings();
         }
 
-        CheckForUpdatesInBackground(settings.Current.UpdateFeedUrl);
+        _ = CheckForUpdatesAsync(userInitiated: false);
 
         // Off the UI thread: walks the install dir to size it, which may touch cold disk.
         var sizeUpdater = _services.GetRequiredService<UninstallSizeUpdater>();
@@ -244,42 +251,135 @@ public partial class App : Application
         };
     }
 
-    /// <summary>Velopack: checks and stages updates in the background. Defaults to GitHub
-    /// Releases on this repo; a non-empty UpdateFeedUrl in settings.json overrides it (handy
-    /// for testing against a local feed). Failures are logged and never block startup.</summary>
-    private void CheckForUpdatesInBackground(string? feedUrlOverride)
+    private static UpdateManager CreateUpdateManager(string? feedUrlOverride) =>
+        string.IsNullOrWhiteSpace(feedUrlOverride)
+            ? new UpdateManager(new GithubSource(UpdateRepoUrl, accessToken: null, prerelease: false))
+            : new UpdateManager(feedUrlOverride);
+
+    private static string CurrentVersion(UpdateManager manager) =>
+        manager.CurrentVersion?.ToString()
+        ?? typeof(App).Assembly.GetName().Version?.ToString(3)
+        ?? "unknown";
+
+    /// <summary>Velopack: checks and stages updates in the background. Failures are logged
+    /// and never block startup; user-initiated checks also report the result in the tray.</summary>
+    private async Task CheckForUpdatesAsync(bool userInitiated)
     {
-        Task.Run(async () =>
+        if (_updateCheckRunning)
         {
-            try
+            return;
+        }
+
+        _updateCheckRunning = true;
+        var tray = _services?.GetService<TrayIcon>();
+        tray?.SetUpdateCheckInProgress(true);
+        try
+        {
+            var manager = _updateManager;
+            if (manager is null)
             {
-                var manager = string.IsNullOrWhiteSpace(feedUrlOverride)
-                    ? new UpdateManager(new GithubSource(UpdateRepoUrl, accessToken: null, prerelease: false))
-                    : new UpdateManager(feedUrlOverride);
-                if (!manager.IsInstalled)
-                {
-                    return; // running unpackaged (dev build)
-                }
-                var update = await manager.CheckForUpdatesAsync().ConfigureAwait(false);
-                if (update is null)
-                {
-                    return;
-                }
-                await manager.DownloadUpdatesAsync(update).ConfigureAwait(false);
-                manager.WaitExitThenApplyUpdates(update, silent: true, restart: false);
-                _log?.Info($"Update {update.TargetFullRelease.Version} staged; applies on next launch.");
+                return;
             }
-            catch (Exception ex)
+            if (!manager.IsInstalled)
             {
-                _log?.Warn("Background update check failed.", ex);
+                if (userInitiated)
+                {
+                    tray?.ShowInfo("Updates unavailable",
+                        "Update checks are available in an installed copy of Stenor.");
+                }
+                return; // running unpackaged (dev build)
             }
-        });
+
+            var pending = manager.UpdatePendingRestart;
+            if (pending is not null)
+            {
+                UpdateReady(pending, tray);
+                return;
+            }
+
+            var update = await manager.CheckForUpdatesAsync();
+            if (update is null)
+            {
+                if (userInitiated)
+                {
+                    tray?.ShowInfo("Stenor is up to date",
+                        $"You’re running the latest version ({CurrentVersion(manager)}).");
+                }
+                return;
+            }
+
+            await manager.DownloadUpdatesAsync(update);
+            UpdateReady(update.TargetFullRelease, tray);
+            _log?.Info($"Update {update.TargetFullRelease.Version} downloaded and ready.");
+        }
+        catch (Exception ex)
+        {
+            _log?.Warn("Background update check failed.", ex);
+            if (userInitiated)
+            {
+                tray?.ShowError("Update check failed",
+                    "Stenor couldn’t check for updates. Please try again later.");
+            }
+        }
+        finally
+        {
+            _updateCheckRunning = false;
+            if (_pendingUpdate is null)
+            {
+                tray?.SetUpdateCheckInProgress(false);
+            }
+        }
+    }
+
+    private void UpdateReady(VelopackAsset update, TrayIcon? tray)
+    {
+        _pendingUpdate = update;
+        if (tray is not null)
+        {
+            tray.SetUpdateReady();
+            tray.ShowInfo("Update ready",
+                $"Stenor {update.Version} is ready. Restart Stenor to install it.");
+        }
+    }
+
+    private void RestartToApplyUpdate()
+    {
+        if (_updateManager is null || _pendingUpdate is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _updateManager.WaitExitThenApplyUpdates(
+                _pendingUpdate, silent: true, restart: true);
+            _updateApplyScheduled = true;
+            Shutdown();
+        }
+        catch (Exception ex)
+        {
+            _log?.Warn("Failed to restart for update.", ex);
+            _services?.GetService<TrayIcon>()?.ShowError(
+                "Update restart failed", "Quit and reopen Stenor to install the update.");
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         if (_ownsInstance)
         {
+            if (!_updateApplyScheduled && _updateManager is not null && _pendingUpdate is not null)
+            {
+                try
+                {
+                    _updateManager.WaitExitThenApplyUpdates(
+                        _pendingUpdate, silent: true, restart: false);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Warn("Failed to schedule update on exit.", ex);
+                }
+            }
             _log?.Info("Stenor shutting down.");
             _services?.Dispose(); // disposes hook, recorder, tray, Gemini client
             _showSettingsEvent?.Dispose();

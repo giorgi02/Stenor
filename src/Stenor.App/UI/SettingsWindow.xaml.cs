@@ -41,6 +41,8 @@ public partial class SettingsWindow : Window
         _log = log;
 
         InitializeComponent();
+        var version = typeof(SettingsWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+        Title = $"Stenor Settings — v{version}";
 
         var current = _settings.Current;
         ApiKeyBox.Password = _settings.GetApiKey() ?? string.Empty;

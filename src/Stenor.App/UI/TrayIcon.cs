@@ -17,10 +17,15 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
     private TaskbarIcon? _icon;
     private MenuItem? _holdItem;
     private MenuItem? _toggleItem;
+    private MenuItem? _updateReadyItem;
+    private Separator? _updateSeparator;
+    private MenuItem? _checkForUpdatesItem;
 
     public event Action? SettingsRequested;
     public event Action? QuitRequested;
     public event Action<ActivationMode>? ModeChangeRequested;
+    public event Action? CheckForUpdatesRequested;
+    public event Action? RestartToUpdateRequested;
 
     public TrayIcon(Logger log) => _log = log;
 
@@ -34,6 +39,18 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         };
 
         var menu = new ContextMenu();
+
+        _updateReadyItem = new MenuItem
+        {
+            Header = "Update ready — Restart Stenor",
+            Icon = CreateMenuGlyph("\uE777"), // Sync
+            Visibility = Visibility.Collapsed,
+        };
+        _updateReadyItem.Click += (_, _) => RestartToUpdateRequested?.Invoke();
+        menu.Items.Add(_updateReadyItem);
+
+        _updateSeparator = new Separator { Visibility = Visibility.Collapsed };
+        menu.Items.Add(_updateSeparator);
 
         var settingsItem = new MenuItem
         {
@@ -51,6 +68,15 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         _toggleItem = new MenuItem { Header = "Activation: Toggle", IsCheckable = true };
         _toggleItem.Click += (_, _) => ModeChangeRequested?.Invoke(ActivationMode.Toggle);
         menu.Items.Add(_toggleItem);
+
+        menu.Items.Add(new Separator());
+        _checkForUpdatesItem = new MenuItem
+        {
+            Header = "Check for updates",
+            Icon = CreateMenuGlyph("\uE72C"), // Refresh
+        };
+        _checkForUpdatesItem.Click += (_, _) => CheckForUpdatesRequested?.Invoke();
+        menu.Items.Add(_checkForUpdatesItem);
 
         menu.Items.Add(new Separator());
         var quitItem = new MenuItem
@@ -90,6 +116,45 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         if (_toggleItem is not null)
         {
             _toggleItem.IsChecked = mode == ActivationMode.Toggle;
+        }
+    }
+
+    public void SetUpdateCheckInProgress(bool isChecking)
+    {
+        if (_checkForUpdatesItem is null)
+        {
+            return;
+        }
+        _checkForUpdatesItem.Header = isChecking ? "Checking for updates…" : "Check for updates";
+        _checkForUpdatesItem.IsEnabled = !isChecking && _updateReadyItem?.Visibility != Visibility.Visible;
+    }
+
+    public void SetUpdateReady()
+    {
+        if (_updateReadyItem is not null)
+        {
+            _updateReadyItem.Visibility = Visibility.Visible;
+        }
+        if (_updateSeparator is not null)
+        {
+            _updateSeparator.Visibility = Visibility.Visible;
+        }
+        if (_checkForUpdatesItem is not null)
+        {
+            _checkForUpdatesItem.Header = "Check for updates";
+            _checkForUpdatesItem.IsEnabled = false;
+        }
+    }
+
+    public void ShowInfo(string title, string message)
+    {
+        try
+        {
+            _icon?.ShowNotification(title, message, NotificationIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn("Balloon notification failed.", ex);
         }
     }
 

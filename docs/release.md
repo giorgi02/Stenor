@@ -110,5 +110,5 @@ shown in the UI — it is meant for manual editing only.
 
 - The installer is **unsigned** (we have no code-signing certificate) — a SmartScreen warning
   is to be expected on first run ("More info" → "Run anyway").
-- An update is applied only on the app's next launch; because Stenor sits in the tray
-  permanently, in practice this means: after a Quit and a fresh start (or a system reboot).
+- Downloaded updates appear in the tray as **Update ready — Restart Stenor**. Choosing it
+  installs the update and relaunches Stenor; a normal Quit also applies a downloaded update.
