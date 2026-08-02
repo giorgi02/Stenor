@@ -1,4 +1,5 @@
 using System.Globalization;
+using Stenor.Constants;
 
 namespace Stenor.Services;
 
@@ -20,8 +21,7 @@ namespace Stenor.Services;
 /// </summary>
 public static class SpeechDetector
 {
-    private const int SampleRate = 16000; // RecorderService always writes 16 kHz/16-bit/mono
-    private const int FrameSamples = SampleRate / 50; // 20 ms
+    private const int FrameSamples = PcmFormat.SampleRateHz / 50; // 20 ms
     private const int FrameMs = 20;
 
     /// <summary>Below ~200 ms there is not enough audio for percentiles to mean anything.</summary>

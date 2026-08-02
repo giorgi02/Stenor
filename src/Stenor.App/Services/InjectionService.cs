@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Stenor.Constants;
 using Stenor.Interfaces;
 using Stenor.Interop;
 
@@ -153,7 +154,7 @@ public sealed class InjectionService : ITextInjector
 
     // -------------------------------------------------------------- keyboard
 
-    private const ushort VkControl = 0x11;
+    private const ushort VkControl = VirtualKeys.Control;
     private const ushort VkV = 0x56;
     private const ushort VkReturn = 0x0D;
 
@@ -174,7 +175,13 @@ public sealed class InjectionService : ITextInjector
     /// key-up of an already-released key as a no-op.</summary>
     private void ReleaseStrayModifiers()
     {
-        Span<ushort> modifierVks = [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C];
+        Span<ushort> modifierVks =
+        [
+            VirtualKeys.LeftShift, VirtualKeys.RightShift,
+            VirtualKeys.LeftControl, VirtualKeys.RightControl,
+            VirtualKeys.LeftAlt, VirtualKeys.RightAlt,
+            VirtualKeys.LeftWin, VirtualKeys.RightWin,
+        ];
         var releases = new List<NativeMethods.INPUT>(4);
         foreach (var vk in modifierVks)
         {

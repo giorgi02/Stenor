@@ -1,3 +1,5 @@
+using Stenor.Constants;
+
 namespace Stenor.Models;
 
 /// <summary>
@@ -7,22 +9,22 @@ namespace Stenor.Models;
 /// </summary>
 public sealed class HotkeySpec
 {
-    public const int VkRControl = 0xA3;
+    public const int DefaultVirtualKey = VirtualKeys.RightControl;
 
-    public int VirtualKey { get; set; } = VkRControl;
+    public int VirtualKey { get; set; } = DefaultVirtualKey;
     public bool Ctrl { get; set; }
     public bool Shift { get; set; }
     public bool Alt { get; set; }
     public bool Win { get; set; }
 
-    public static HotkeySpec Default => new() { VirtualKey = VkRControl };
+    public static HotkeySpec Default => new() { VirtualKey = DefaultVirtualKey };
 
     public static bool IsModifierKey(int vk) => vk is
-        0xA0 or 0xA1 or // L/R Shift
-        0xA2 or 0xA3 or // L/R Ctrl
-        0xA4 or 0xA5 or // L/R Alt
-        0x5B or 0x5C or // L/R Win
-        0x10 or 0x11 or 0x12; // generic Shift/Ctrl/Alt
+        VirtualKeys.LeftShift or VirtualKeys.RightShift or
+        VirtualKeys.LeftControl or VirtualKeys.RightControl or
+        VirtualKeys.LeftAlt or VirtualKeys.RightAlt or
+        VirtualKeys.LeftWin or VirtualKeys.RightWin or
+        VirtualKeys.Shift or VirtualKeys.Control or VirtualKeys.Alt;
 
     public HotkeySpec Clone() => new()
     {

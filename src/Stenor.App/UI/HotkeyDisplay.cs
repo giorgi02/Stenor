@@ -1,4 +1,5 @@
 using System.Text;
+using Stenor.Constants;
 using Stenor.Interop;
 using Stenor.Models;
 
@@ -21,14 +22,14 @@ public static class HotkeyDisplay
 
     public static string KeyName(int vk) => vk switch
     {
-        0xA0 => "Left Shift",
-        0xA1 => "Right Shift",
-        0xA2 => "Left Ctrl",
-        0xA3 => "Right Ctrl",
-        0xA4 => "Left Alt",
-        0xA5 => "Right Alt",
-        0x5B => "Left Win",
-        0x5C => "Right Win",
+        VirtualKeys.LeftShift => "Left Shift",
+        VirtualKeys.RightShift => "Right Shift",
+        VirtualKeys.LeftControl => "Left Ctrl",
+        VirtualKeys.RightControl => "Right Ctrl",
+        VirtualKeys.LeftAlt => "Left Alt",
+        VirtualKeys.RightAlt => "Right Alt",
+        VirtualKeys.LeftWin => "Left Win",
+        VirtualKeys.RightWin => "Right Win",
         0x20 => "Space",
         0x0D => "Enter",
         0x09 => "Tab",
@@ -57,7 +58,8 @@ public static class HotkeyDisplay
         }
 
         var lParam = (int)(scan << 16);
-        var isExtended = vk is (>= 0x21 and <= 0x28) or 0x2C or 0x2D or 0x2E or 0x5D or 0x6F or 0x90 or 0xA3 or 0xA5;
+        var isExtended = vk is (>= 0x21 and <= 0x28) or 0x2C or 0x2D or 0x2E or 0x5D or 0x6F or 0x90
+            or VirtualKeys.RightControl or VirtualKeys.RightAlt;
         if (isExtended)
         {
             lParam |= 1 << 24;

@@ -1,5 +1,6 @@
 using System.IO;
 using NAudio.CoreAudioApi;
+using Stenor.Constants;
 using Stenor.Interfaces;
 using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Utils;
@@ -116,10 +117,11 @@ public sealed class RecorderService : IRecorderService, IDisposable
                     ? new StereoToMonoSampleProvider(samples) { LeftVolume = 0.5f, RightVolume = 0.5f }
                     : new AnyToMonoSampleProvider(samples);
             }
-            _pipeline = new WdlResamplingSampleProvider(samples, 16000);
+            _pipeline = new WdlResamplingSampleProvider(samples, PcmFormat.SampleRateHz);
 
             _wavStream = new MemoryStream();
-            _writer = new WaveFileWriter(new IgnoreDisposeStream(_wavStream), new WaveFormat(16000, 16, 1));
+            _writer = new WaveFileWriter(new IgnoreDisposeStream(_wavStream),
+                new WaveFormat(PcmFormat.SampleRateHz, PcmFormat.BitsPerSample, PcmFormat.ChannelCount));
             _lastLevel = 0f;
             _stopCompleted.Reset();
             _recording = true;

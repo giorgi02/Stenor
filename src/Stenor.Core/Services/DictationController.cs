@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Stenor.Constants;
 using Stenor.Interfaces;
 using Stenor.Models;
 
@@ -21,7 +22,10 @@ namespace Stenor.Services;
 public sealed class DictationController
 {
     private static readonly TimeSpan MinHoldDuration = TimeSpan.FromMilliseconds(150);
-    private const int MinWavBytes = 44 + 8000; // ~0.25 s of 16 kHz 16-bit audio
+    private const int WavHeaderBytes = 44;
+    private const int MinimumAudioDurationMs = 250;
+    private const int MinimumWavBytes = WavHeaderBytes
+        + PcmFormat.BytesPerSecond * MinimumAudioDurationMs / 1000;
 
     /// <summary>How long after the audio stream ends to wait for the trailing transcript
     /// chunks (measured ~0.5 s on the live model).</summary>
@@ -257,7 +261,7 @@ public sealed class DictationController
             {
                 await FinishLiveAsync(cycle, wav).ConfigureAwait(false);
             }
-            else if (wav is null || wav.Length < MinWavBytes)
+            else if (wav is null || wav.Length < MinimumWavBytes)
             {
                 SetState(State.Idle);
                 _overlay.Hide();
@@ -415,7 +419,7 @@ public sealed class DictationController
             return;
         }
 
-        if (wav is null || wav.Length < MinWavBytes)
+        if (wav is null || wav.Length < MinimumWavBytes)
         {
             SetState(State.Idle);
             _overlay.Hide();

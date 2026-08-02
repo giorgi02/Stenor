@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Stenor.Constants;
 using Stenor.Interfaces;
 using Stenor.Interop;
 using Stenor.Models;
@@ -59,7 +60,7 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
 
     // --- Hot-path fields read by the hook callback (written via Volatile from other threads).
     private volatile bool _suspended;
-    private int _targetMainVk = HotkeySpec.VkRControl;
+    private int _targetMainVk = HotkeySpec.DefaultVirtualKey;
     private int _targetMods;          // generic bitmask; 0 for single-key hotkeys
     private int _swallowCombo;        // 1 when the main key of a matched combo must be swallowed
     // --- Hook-thread-only state.
@@ -201,14 +202,14 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
     {
         var bit = vk switch
         {
-            0xA2 => LCtrl,
-            0xA3 => RCtrl,
-            0xA0 => LShift,
-            0xA1 => RShift,
-            0xA4 => LAlt,
-            0xA5 => RAlt,
-            0x5B => LWin,
-            0x5C => RWin,
+            VirtualKeys.LeftControl => LCtrl,
+            VirtualKeys.RightControl => RCtrl,
+            VirtualKeys.LeftShift => LShift,
+            VirtualKeys.RightShift => RShift,
+            VirtualKeys.LeftAlt => LAlt,
+            VirtualKeys.RightAlt => RAlt,
+            VirtualKeys.LeftWin => LWin,
+            VirtualKeys.RightWin => RWin,
             _ => 0,
         };
         if (bit != 0)
@@ -301,10 +302,10 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
     {
         var bit = e.Vk switch
         {
-            0xA2 or 0xA3 => ModCtrl,
-            0xA0 or 0xA1 => ModShift,
-            0xA4 or 0xA5 => ModAlt,
-            0x5B or 0x5C => ModWin,
+            VirtualKeys.LeftControl or VirtualKeys.RightControl => ModCtrl,
+            VirtualKeys.LeftShift or VirtualKeys.RightShift => ModShift,
+            VirtualKeys.LeftAlt or VirtualKeys.RightAlt => ModAlt,
+            VirtualKeys.LeftWin or VirtualKeys.RightWin => ModWin,
             _ => 0,
         };
         if (bit != 0)

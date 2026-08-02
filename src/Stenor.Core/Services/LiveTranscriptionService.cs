@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Google.GenAI;
 using Google.GenAI.Types;
+using Stenor.Constants;
 using Stenor.Models;
 
 namespace Stenor.Services;
@@ -136,7 +137,7 @@ public sealed class LiveTranscriptionService
         public Task SendAudioAsync(byte[] pcm, CancellationToken ct) => _session
             .SendRealtimeInputAsync(new LiveSendRealtimeInputParameters
             {
-                Audio = new Blob { MimeType = "audio/pcm;rate=16000", Data = pcm },
+                Audio = new Blob { MimeType = PcmFormat.MimeType, Data = pcm },
             })
             .WaitAsync(ct);
 
