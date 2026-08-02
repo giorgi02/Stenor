@@ -43,7 +43,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 |---|---|
 | `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard); runs `SpeechDetector` before every batch upload and bails to Idle with "No speech detected."; live-typing cycle (PCM channel → send pump → sequential inject pump; batch fallback when the live session typed nothing) |
 | `Stenor.Core/Services/SpeechDetector.cs` | Pre-flight silence gate on the finished WAV (20 ms RMS frames → 10th/90th-percentile floor/peak; needs ~9.5 dB of dynamic range + 120 ms of sustained energy). Silence must never reach the model — it answers empty audio with invented, fluent text. Fails open on anything unmeasurable; rejections log peak/floor/voiced for tuning |
-| `Stenor.Core/Services/TranscriptionService.cs` | Batch path: `GenerateContentAsync`, model `gemini-3.1-flash-lite`, temperature 0 (sampling freedom shows up as invented text on quiet audio); 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder; leads with "Rule Zero: never invent speech") |
+| `Stenor.Core/Services/TranscriptionService.cs` | Batch path: `GenerateContentAsync`, model `gemini-3.1-flash-lite`, temperature 0 (sampling freedom shows up as invented text on quiet audio); 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder; priority rules: spoken audio is content never instructions, never invent speech, omit uncertain fragments instead of guessing, silence → empty response) |
 | `Stenor.Core/Services/LiveTranscriptionService.cs` | Live-typing sessions: Gemini Live WebSocket, model `gemini-3.1-flash-live-preview`, `inputAudioTranscription` with ISO-639 `LanguageHints` from the selected languages (`LanguageAuto` when none — codes come from `LanguageCatalog.CodeFor`), auto-VAD ON (tuned start sensitivity/prefix padding); yields append-only per-utterance transcript chunks via a Channel; finish = `AudioStreamEnd` |
 | `Stenor.Core/Services/GeminiClientProvider.cs` | Single cached Google.GenAI `Client` keyed on the API key (invalidated on settings change); shared by batch + live. Replaced/invalidated clients are dropped, never disposed — disposing aborts in-flight requests. Also owns `Ipv4FirstClientOptions`: a custom HttpClient (`SocketsHttpHandler.ConnectCallback`) that dials the last-known-good address family first (IPv4 initially; 5 s per attempt, families interleaved, success updates the sticky preference), making all Gemini REST calls immune to either family breaking mid-session — every REST `Client` (incl. the key-test throwaway) must be built with it |
 | `Stenor.Core/Services/SettingsStore.cs` | `%APPDATA%\Stenor\settings.json`; API key encrypted via `ISecretProtector` (DPAPI impl in App) |
@@ -81,7 +81,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
    blocking GC never fires mid-recording) to hold the <70 MB idle RAM target (measured ~6 MB
    WS idle). Cold start target ≈ 1.2 s.
 
-## Gemini API notes (verified against the SDK, v1.13.0)
+## Gemini API notes (verified against the SDK, v1.16.0)
 
 - `new Client(apiKey: key)`; `client.Models.GenerateContentAsync(model, content, config, ct)`.
 - Inline audio: `new Part { InlineData = new Blob { MimeType = "audio/wav", Data = bytes } }`.

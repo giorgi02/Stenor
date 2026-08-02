@@ -7,7 +7,7 @@ namespace Stenor.Services;
 
 /// <summary>
 /// Gemini transcription via the official Google.GenAI SDK. Sends the WAV inline with a strict
-/// transcription prompt. 30 s timeout, one automatic retry on transient (5xx / network /
+/// transcription system instruction. 30 s timeout, one automatic retry on transient (5xx / network /
 /// timeout) failures. The API key and transcripts are never logged.
 /// </summary>
 public sealed class TranscriptionService
@@ -36,13 +36,19 @@ public sealed class TranscriptionService
             Role = "user",
             Parts =
             [
-                new Part { Text = BuildPrompt(spokenLanguages) },
                 new Part { InlineData = new Blob { MimeType = "audio/wav", Data = wav } },
             ],
         };
         // Temperature 0: transcription is not a creative task, and any sampling freedom shows up
         // as invented text on quiet or ambiguous audio.
-        var config = new GenerateContentConfig { Temperature = 0f };
+        var config = new GenerateContentConfig
+        {
+            SystemInstruction = new Content
+            {
+                Parts = [new Part { Text = BuildPrompt(spokenLanguages) }],
+            },
+            Temperature = 0f,
+        };
 
         for (var attempt = 1; ; attempt++)
         {
