@@ -44,18 +44,18 @@ public sealed class DictationController
 
     private readonly Logger _log;
     private readonly SettingsStore _settings;
-    private readonly IHotkeyService _hotkeys;
-    private readonly IRecorderService _recorder;
-    private readonly TranscriptionService _transcription;
-    private readonly LiveTranscriptionService _live;
-    private readonly ITextInjector _injection;
+    private readonly IHotkeyService _hotkeyService;
+    private readonly IRecorderService _recorderService;
+    private readonly TranscriptionService _transcriptionService;
+    private readonly LiveTranscriptionService _liveTranscriptionService;
+    private readonly ITextInjector _textInjector;
     private readonly IDictationOverlay _overlay;
-    private readonly ITrayNotifier _tray;
+    private readonly ITrayNotifier _trayNotifier;
 
-    private readonly object _gate = new();
+    private readonly object _stateLock = new();
     private State _state = State.Idle;
-    private CancellationTokenSource? _transcribeCts;
-    private LiveCycle? _liveCycle; // written under _gate; read lock-free by the PCM tap
+    private CancellationTokenSource? _transcriptionCancellation;
+    private LiveCycle? _liveCycle; // written under _stateLock; read lock-free by the PCM tap
 
     /// <summary>Per-dictation live-typing state. Torn down by exactly one of: graceful stop,
     /// cancel/tap discard, recorder failure, or session failure (arbitrated by TryTransition).</summary>
@@ -96,22 +96,22 @@ public sealed class DictationController
     {
         _log = log;
         _settings = settings;
-        _hotkeys = hotkeys;
-        _recorder = recorder;
-        _transcription = transcription;
-        _live = live;
-        _injection = injection;
+        _hotkeyService = hotkeys;
+        _recorderService = recorder;
+        _transcriptionService = transcription;
+        _liveTranscriptionService = live;
+        _textInjector = injection;
         _overlay = overlay;
-        _tray = tray;
+        _trayNotifier = tray;
     }
 
     public void Initialize()
     {
-        _hotkeys.Pressed += OnHotkeyPressed;
-        _hotkeys.Released += OnHotkeyReleased;
+        _hotkeyService.Pressed += OnHotkeyPressed;
+        _hotkeyService.Released += OnHotkeyReleased;
         _overlay.CancelRequested += Cancel;
-        _recorder.MaxDurationReached += OnMaxDuration;
-        _recorder.Failed += OnRecorderFailed;
+        _recorderService.MaxDurationReached += OnMaxDuration;
+        _recorderService.Failed += OnRecorderFailed;
     }
 
     // ---------------------------------------------------------- hotkey input
@@ -132,7 +132,7 @@ public sealed class DictationController
                         StartRecording();
                         break;
                     case State.Recording:
-                        _ = StopAndTranscribeAsync();
+                        _ = StopAndProcessDictationAsync();
                         break;
                 }
             }
@@ -157,7 +157,7 @@ public sealed class DictationController
             }
             else
             {
-                _ = StopAndTranscribeAsync();
+                _ = StopAndProcessDictationAsync();
             }
         }
         catch (Exception ex)
@@ -169,7 +169,7 @@ public sealed class DictationController
     private void OnMaxDuration()
     {
         _log.Info("Max recording duration reached; auto-stopping.");
-        _ = StopAndTranscribeAsync();
+        _ = StopAndProcessDictationAsync();
     }
 
     private void OnRecorderFailed(string message)
@@ -180,7 +180,7 @@ public sealed class DictationController
         }
         var hadLiveCycle = AbandonLiveCycle();
         _overlay.ShowError(message);
-        _tray.ShowError("Stenor", message);
+        _trayNotifier.ShowError("Stenor", message);
         if (hadLiveCycle)
         {
             RaiseSafely(DictationCompleted, nameof(DictationCompleted));
@@ -200,25 +200,26 @@ public sealed class DictationController
         {
             SetState(State.Idle);
             _overlay.ShowError("Add your Gemini API key in Settings.");
-            _tray.ShowError("Stenor", "No API key configured. Open Settings from the tray icon.");
+            _trayNotifier.ShowError(
+                "Stenor", "No API key configured. Open Settings from the tray icon.");
             return;
         }
 
         if (_settings.Current.LiveTyping)
         {
             var cycle = new LiveCycle();
-            lock (_gate)
+            lock (_stateLock)
             {
                 _liveCycle = cycle;
             }
-            _recorder.PcmChunkAvailable += OnPcmChunk; // before Start so no chunk is missed
+            _recorderService.PcmChunkAvailable += OnPcmChunk; // before Start so no chunk is missed
             cycle.Pipeline = Task.Run(() => RunLivePipelineAsync(cycle));
         }
 
         try
         {
-            _recorder.Start();
-            _overlay.ShowRecording(() => _recorder.CurrentLevel);
+            _recorderService.Start();
+            _overlay.ShowRecording(() => _recorderService.CurrentLevel);
             RaiseSafely(DictationStarted, nameof(DictationStarted));
         }
         catch (Exception ex)
@@ -227,7 +228,8 @@ public sealed class DictationController
             AbandonLiveCycle();
             _log.Error("Recording could not be started.", ex);
             _overlay.ShowError("Microphone unavailable.");
-            _tray.ShowError("Stenor", "Could not start recording - check your microphone.");
+            _trayNotifier.ShowError(
+                "Stenor", "Could not start recording - check your microphone.");
         }
     }
 
@@ -237,7 +239,7 @@ public sealed class DictationController
         {
             return;
         }
-        _recorder.Cancel();
+        _recorderService.Cancel();
         _overlay.Hide();
         if (AbandonLiveCycle())
         {
@@ -246,7 +248,7 @@ public sealed class DictationController
         }
     }
 
-    private async Task StopAndTranscribeAsync()
+    private async Task StopAndProcessDictationAsync()
     {
         if (!TryTransition(State.Recording, State.Transcribing))
         {
@@ -255,11 +257,11 @@ public sealed class DictationController
 
         try
         {
-            var wav = _recorder.Stop(); // blocks until the last PCM chunk reached the tap
+            var wav = _recorderService.Stop(); // blocks until the last PCM chunk reached the tap
             var cycle = DetachLiveCycle();
             if (cycle is not null)
             {
-                await FinishLiveAsync(cycle, wav).ConfigureAwait(false);
+                await FinishLiveDictationAsync(cycle, wav).ConfigureAwait(false);
             }
             else if (wav is null || wav.Length < MinimumWavBytes)
             {
@@ -275,21 +277,22 @@ public sealed class DictationController
         {
             _log.Error("Transcription failed.", ex);
             _overlay.ShowError(ex.Message);
-            _tray.ShowError("Stenor", ex.Message);
+            _trayNotifier.ShowError("Stenor", ex.Message);
         }
         catch (Exception ex)
         {
             _log.Error("Dictation pipeline failed.", ex);
             _overlay.ShowError("Something went wrong - see the log.");
-            _tray.ShowError("Stenor", "Dictation failed unexpectedly. Details were logged.");
+            _trayNotifier.ShowError(
+                "Stenor", "Dictation failed unexpectedly. Details were logged.");
         }
         finally
         {
-            lock (_gate)
+            lock (_stateLock)
             {
                 _state = State.Idle;
-                _transcribeCts?.Dispose();
-                _transcribeCts = null;
+                _transcriptionCancellation?.Dispose();
+                _transcriptionCancellation = null;
             }
             RaiseSafely(DictationCompleted, nameof(DictationCompleted));
         }
@@ -297,7 +300,7 @@ public sealed class DictationController
 
     /// <summary>The batch path: one Gemini call over the finished WAV, then a single injection.
     /// Also the fallback when a live session produced no text. Runs inside
-    /// <see cref="StopAndTranscribeAsync"/>'s try/finally.</summary>
+    /// <see cref="StopAndProcessDictationAsync"/>'s try/finally.</summary>
     private async Task TranscribeAndInjectAsync(byte[] wav)
     {
         // Never upload silence: the model answers an empty recording with invented, fluent text.
@@ -314,17 +317,17 @@ public sealed class DictationController
         _log.Info($"Transcribing {wav.Length / 1024} KB of audio.");
 
         CancellationToken token;
-        lock (_gate)
+        lock (_stateLock)
         {
-            _transcribeCts?.Dispose();
-            _transcribeCts = new CancellationTokenSource();
-            token = _transcribeCts.Token;
+            _transcriptionCancellation?.Dispose();
+            _transcriptionCancellation = new CancellationTokenSource();
+            token = _transcriptionCancellation.Token;
         }
 
         string text;
         try
         {
-            text = await _transcription
+            text = await _transcriptionService
                 .TranscribeAsync(wav, _settings.Current.SpokenLanguages, token)
                 .ConfigureAwait(false);
         }
@@ -343,7 +346,7 @@ public sealed class DictationController
         }
 
         SetState(State.Injecting);
-        await _injection
+        await _textInjector
             .InjectAsync(text, _settings.Current.UseUnicodeTypingFallback)
             .ConfigureAwait(false);
 
@@ -354,14 +357,14 @@ public sealed class DictationController
     /// <summary>Winds down a live cycle after the recorder stopped: lets the send pump drain,
     /// waits for the trailing transcript chunks, then picks the outcome - Done, batch fallback
     /// (nothing was typed), partial-kept error, or plain hide on user cancel.</summary>
-    private async Task FinishLiveAsync(LiveCycle cycle, byte[]? wav)
+    private async Task FinishLiveDictationAsync(LiveCycle cycle, byte[]? wav)
     {
         cycle.Pcm.Writer.TryComplete(); // send pump finishes the tail, then signals AudioStreamEnd
         _overlay.ShowTranscribing();
-        lock (_gate)
+        lock (_stateLock)
         {
-            _transcribeCts?.Dispose();
-            _transcribeCts = cycle.Cts; // the overlay's X aborts the drain like a batch cancel
+            _transcriptionCancellation?.Dispose();
+            _transcriptionCancellation = cycle.Cts; // the overlay's X aborts the drain like a batch cancel
         }
 
         var pipeline = cycle.Pipeline ?? Task.CompletedTask;
@@ -409,7 +412,7 @@ public sealed class DictationController
             {
                 const string message = "Live typing lost the connection - the text typed so far was kept.";
                 _overlay.ShowError(message);
-                _tray.ShowError("Stenor", message);
+                _trayNotifier.ShowError("Stenor", message);
             }
             else
             {
@@ -444,13 +447,13 @@ public sealed class DictationController
     {
         try
         {
-            var session = await _live
+            var session = await _liveTranscriptionService
                 .ConnectAsync(_settings.Current.SpokenLanguages, cycle.Cts.Token)
                 .ConfigureAwait(false);
             await using (session.ConfigureAwait(false))
             {
                 _log.Info("Live session connected.");
-                cycle.Injector = Task.Run(() => InjectLoopAsync(session, cycle));
+                cycle.Injector = Task.Run(() => RunLiveInjectionLoopAsync(session, cycle));
                 await foreach (var pcm in cycle.Pcm.Reader.ReadAllAsync(cycle.Cts.Token).ConfigureAwait(false))
                 {
                     await session.SendAudioAsync(pcm, cycle.Cts.Token).ConfigureAwait(false);
@@ -478,7 +481,8 @@ public sealed class DictationController
     /// <summary>Single consumer of the transcript chunks; keeps injections strictly in order.
     /// Chunks arrive one utterance at a time with no separating whitespace, so consecutive
     /// chunks are joined with a space. Chunk text is never logged.</summary>
-    private async Task InjectLoopAsync(LiveTranscriptionService.Session session, LiveCycle cycle)
+    private async Task RunLiveInjectionLoopAsync(
+        LiveTranscriptionService.Session session, LiveCycle cycle)
     {
         try
         {
@@ -488,7 +492,7 @@ public sealed class DictationController
                 var text = lastChar != '\0' && !char.IsWhiteSpace(lastChar) && !char.IsWhiteSpace(chunk[0])
                     ? " " + chunk
                     : chunk;
-                await _injection.InjectAsync(text, useUnicodeTyping: true).ConfigureAwait(false);
+                await _textInjector.InjectAsync(text, useUnicodeTyping: true).ConfigureAwait(false);
                 cycle.AnyTextInjected = true;
                 lastChar = chunk[^1];
             }
@@ -513,10 +517,10 @@ public sealed class DictationController
             return;
         }
         AbandonLiveCycle(); // detach the tap first so a rapid re-press cannot double-subscribe
-        _recorder.Cancel();
+        _recorderService.Cancel();
         const string message = "Live typing lost the connection - the text typed so far was kept.";
         _overlay.ShowError(message);
-        _tray.ShowError("Stenor", message);
+        _trayNotifier.ShowError("Stenor", message);
         RaiseSafely(DictationCompleted, nameof(DictationCompleted));
     }
 
@@ -525,14 +529,14 @@ public sealed class DictationController
     private LiveCycle? DetachLiveCycle()
     {
         LiveCycle? cycle;
-        lock (_gate)
+        lock (_stateLock)
         {
             cycle = _liveCycle;
             _liveCycle = null;
         }
         if (cycle is not null)
         {
-            _recorder.PcmChunkAvailable -= OnPcmChunk;
+            _recorderService.PcmChunkAvailable -= OnPcmChunk;
         }
         return cycle;
     }
@@ -596,7 +600,7 @@ public sealed class DictationController
     private void Cancel()
     {
         State state;
-        lock (_gate)
+        lock (_stateLock)
         {
             state = _state;
         }
@@ -606,9 +610,9 @@ public sealed class DictationController
                 CancelRecording();
                 break;
             case State.Transcribing:
-                lock (_gate)
+                lock (_stateLock)
                 {
-                    _transcribeCts?.Cancel();
+                    _transcriptionCancellation?.Cancel();
                 }
                 break;
         }
@@ -616,7 +620,7 @@ public sealed class DictationController
 
     private State CurrentState()
     {
-        lock (_gate)
+        lock (_stateLock)
         {
             return _state;
         }
@@ -624,7 +628,7 @@ public sealed class DictationController
 
     private void SetState(State state)
     {
-        lock (_gate)
+        lock (_stateLock)
         {
             _state = state;
         }
@@ -634,7 +638,7 @@ public sealed class DictationController
     /// the machine is in any other state (the trigger is then ignored).</summary>
     private bool TryTransition(State from, State to)
     {
-        lock (_gate)
+        lock (_stateLock)
         {
             if (_state != from)
             {

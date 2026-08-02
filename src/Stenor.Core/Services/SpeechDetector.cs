@@ -21,15 +21,15 @@ namespace Stenor.Services;
 /// </summary>
 public static class SpeechDetector
 {
-    private const int FrameSamples = PcmFormat.SampleRateHz / 50; // 20 ms
-    private const int FrameMs = 20;
+    private const int SamplesPerFrame = PcmFormat.SampleRateHz / 50; // 20 ms
+    private const int FrameDurationMs = 20;
 
     /// <summary>Below ~200 ms there is not enough audio for percentiles to mean anything.</summary>
-    private const int MinFrames = 10;
+    private const int MinimumFrameCount = 10;
 
     /// <summary>~-56 dBFS. Guards a muted/dead mic; set low on purpose, since the dynamic-range
     /// test below - not loudness - is what actually rejects silence.</summary>
-    private const double MinPeak = 0.0015;
+    private const double MinimumSignalPeak = 0.0015;
 
     /// <summary>~-66 dBFS. The floor is clamped up to this before deriving the voiced threshold,
     /// so a digitally silent lead-in cannot collapse the threshold to zero and mark every frame
@@ -40,104 +40,113 @@ public static class SpeechDetector
     /// land at 1.05-1.1x however loud they are, so the gap is wide and this sits deliberately on
     /// the permissive side of it to keep quiet speakers safe. Speech under ~9 dB above its own
     /// room floor is the known blind spot - unusable for the model anyway.</summary>
-    private const double MinDynamicRange = 3.0;
+    private const double MinimumDynamicRange = 3.0;
 
     /// <summary>120 ms of sustained energy - one short word clears it, a single click does not.</summary>
-    private const int MinVoicedFrames = 120 / FrameMs;
+    private const int MinimumVoicedFrameCount = 120 / FrameDurationMs;
 
     /// <summary>Verdict plus the measurements behind it, so a rejection can be tuned from the log.</summary>
-    public readonly record struct Result(bool HasSpeech, double Floor, double Peak, int VoicedMs)
+    public readonly record struct AnalysisResult(
+        bool HasSpeech, double NoiseFloor, double SignalPeak, int VoicedDurationMs)
     {
         public override string ToString() => string.Create(
             CultureInfo.InvariantCulture,
-            $"peak {Dbfs(Peak):F1} dBFS, floor {Dbfs(Floor):F1} dBFS, voiced {VoicedMs} ms");
+            $"peak {ToDecibelsFullScale(SignalPeak):F1} dBFS, floor {ToDecibelsFullScale(NoiseFloor):F1} dBFS, voiced {VoicedDurationMs} ms");
 
-        private static double Dbfs(double level) => 20 * Math.Log10(Math.Max(level, 1e-6));
+        private static double ToDecibelsFullScale(double level) =>
+            20 * Math.Log10(Math.Max(level, 1e-6));
     }
 
     /// <summary>Analyzes a 16 kHz/16-bit/mono WAV produced by the recorder.</summary>
-    public static Result Analyze(byte[] wav)
+    public static AnalysisResult Analyze(byte[] wavData)
     {
-        if (!TryFindDataChunk(wav, out var start, out var length))
+        if (!TryFindDataChunk(wavData, out var dataOffset, out var dataLength))
         {
-            return new Result(HasSpeech: true, 0, 0, 0); // unreadable header - let Gemini decide
+            return new AnalysisResult(
+                HasSpeech: true, 0, 0, 0); // unreadable header - let Gemini decide
         }
 
-        var frameCount = length / 2 / FrameSamples;
-        if (frameCount < MinFrames)
+        var frameCount = dataLength / 2 / SamplesPerFrame;
+        if (frameCount < MinimumFrameCount)
         {
-            return new Result(HasSpeech: true, 0, 0, 0);
+            return new AnalysisResult(HasSpeech: true, 0, 0, 0);
         }
 
-        var rms = new double[frameCount];
-        for (var f = 0; f < frameCount; f++)
+        var rootMeanSquareLevels = new double[frameCount];
+        for (var frameIndex = 0; frameIndex < frameCount; frameIndex++)
         {
-            var offset = start + f * FrameSamples * 2;
-            var sum = 0.0;
-            for (var i = 0; i < FrameSamples; i++)
+            var frameOffset = dataOffset + frameIndex * SamplesPerFrame * 2;
+            var squaredSampleSum = 0.0;
+            for (var sampleIndex = 0; sampleIndex < SamplesPerFrame; sampleIndex++)
             {
-                double sample = (short)(wav[offset + i * 2] | (wav[offset + i * 2 + 1] << 8));
-                sum += sample * sample;
+                double sample = (short)(wavData[frameOffset + sampleIndex * 2]
+                    | (wavData[frameOffset + sampleIndex * 2 + 1] << 8));
+                squaredSampleSum += sample * sample;
             }
-            rms[f] = Math.Sqrt(sum / FrameSamples) / 32768.0;
+            rootMeanSquareLevels[frameIndex] =
+                Math.Sqrt(squaredSampleSum / SamplesPerFrame) / 32768.0;
         }
 
-        var sorted = (double[])rms.Clone();
-        Array.Sort(sorted);
-        var floor = Percentile(sorted, 0.10);
-        var peak = Percentile(sorted, 0.90);
+        var sortedLevels = (double[])rootMeanSquareLevels.Clone();
+        Array.Sort(sortedLevels);
+        var noiseFloor = Percentile(sortedLevels, 0.10);
+        var signalPeak = Percentile(sortedLevels, 0.90);
 
         // Geometric mean = the midpoint in dB between floor and peak. Roughly half the frames of
         // continuously spoken audio sit above it, so a pause-free clip still passes comfortably.
-        var threshold = Math.Sqrt(Math.Max(floor, NoiseEpsilon) * peak);
-        var voiced = 0;
-        foreach (var level in rms)
+        var voicedThreshold = Math.Sqrt(Math.Max(noiseFloor, NoiseEpsilon) * signalPeak);
+        var voicedFrameCount = 0;
+        foreach (var level in rootMeanSquareLevels)
         {
-            if (level >= threshold)
+            if (level >= voicedThreshold)
             {
-                voiced++;
+                voicedFrameCount++;
             }
         }
 
-        var hasSpeech = peak >= MinPeak
-            && peak >= floor * MinDynamicRange
-            && voiced >= MinVoicedFrames;
-        return new Result(hasSpeech, floor, peak, voiced * FrameMs);
+        var hasSpeech = signalPeak >= MinimumSignalPeak
+            && signalPeak >= noiseFloor * MinimumDynamicRange
+            && voicedFrameCount >= MinimumVoicedFrameCount;
+        return new AnalysisResult(
+            hasSpeech, noiseFloor, signalPeak, voicedFrameCount * FrameDurationMs);
     }
 
-    private static double Percentile(double[] sorted, double fraction) =>
-        sorted[(int)(fraction * (sorted.Length - 1))];
+    private static double Percentile(double[] sortedValues, double fraction) =>
+        sortedValues[(int)(fraction * (sortedValues.Length - 1))];
 
     /// <summary>Walks the RIFF chunk list for "data" rather than assuming a 44-byte header.</summary>
-    private static bool TryFindDataChunk(byte[] wav, out int start, out int length)
+    private static bool TryFindDataChunk(
+        byte[] wavData, out int dataOffset, out int dataLength)
     {
-        start = 0;
-        length = 0;
-        if (wav.Length < 44 || !Matches(wav, 0, "RIFF") || !Matches(wav, 8, "WAVE"))
+        dataOffset = 0;
+        dataLength = 0;
+        if (wavData.Length < 44
+            || !MatchesChunkId(wavData, 0, "RIFF")
+            || !MatchesChunkId(wavData, 8, "WAVE"))
         {
             return false;
         }
 
-        var pos = 12;
-        while (pos + 8 <= wav.Length)
+        var chunkOffset = 12;
+        while (chunkOffset + 8 <= wavData.Length)
         {
-            var size = BitConverter.ToInt32(wav, pos + 4);
-            if (size < 0)
+            var chunkSize = BitConverter.ToInt32(wavData, chunkOffset + 4);
+            if (chunkSize < 0)
             {
                 return false;
             }
-            if (Matches(wav, pos, "data"))
+            if (MatchesChunkId(wavData, chunkOffset, "data"))
             {
-                start = pos + 8;
-                length = Math.Min(size, wav.Length - start);
-                return length > 0;
+                dataOffset = chunkOffset + 8;
+                dataLength = Math.Min(chunkSize, wavData.Length - dataOffset);
+                return dataLength > 0;
             }
-            pos += 8 + size + (size & 1); // chunks are word-aligned
+            chunkOffset += 8 + chunkSize + (chunkSize & 1); // chunks are word-aligned
         }
         return false;
     }
 
-    private static bool Matches(byte[] wav, int offset, string id) =>
-        wav[offset] == id[0] && wav[offset + 1] == id[1]
-        && wav[offset + 2] == id[2] && wav[offset + 3] == id[3];
+    private static bool MatchesChunkId(byte[] wavData, int offset, string chunkId) =>
+        wavData[offset] == chunkId[0] && wavData[offset + 1] == chunkId[1]
+        && wavData[offset + 2] == chunkId[2] && wavData[offset + 3] == chunkId[3];
 }

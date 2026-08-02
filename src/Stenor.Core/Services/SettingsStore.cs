@@ -19,20 +19,20 @@ public sealed class SettingsStore
     };
 
     private readonly Logger _log;
-    private readonly ISecretProtector _protector;
-    private readonly object _sync = new();
-    private readonly string _directory;
-    private readonly string _file;
+    private readonly ISecretProtector _secretProtector;
+    private readonly object _syncRoot = new();
+    private readonly string _settingsDirectoryPath;
+    private readonly string _settingsFilePath;
 
     public event Action? Changed;
 
     public SettingsStore(Logger log, ISecretProtector protector)
     {
         _log = log;
-        _protector = protector;
-        _directory = Path.Combine(
+        _secretProtector = protector;
+        _settingsDirectoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Stenor");
-        _file = Path.Combine(_directory, "settings.json");
+        _settingsFilePath = Path.Combine(_settingsDirectoryPath, "settings.json");
         Current = new AppSettings();
     }
 
@@ -40,13 +40,14 @@ public sealed class SettingsStore
 
     public void Load()
     {
-        lock (_sync)
+        lock (_syncRoot)
         {
             try
             {
-                if (File.Exists(_file))
+                if (File.Exists(_settingsFilePath))
                 {
-                    var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_file), JsonOptions);
+                    var loaded = JsonSerializer.Deserialize<AppSettings>(
+                        File.ReadAllText(_settingsFilePath), JsonOptions);
                     if (loaded is not null)
                     {
                         MigrateLegacyLanguage(loaded);
@@ -80,12 +81,13 @@ public sealed class SettingsStore
 
     public void Save(AppSettings settings)
     {
-        lock (_sync)
+        lock (_syncRoot)
         {
             try
             {
-                Directory.CreateDirectory(_directory);
-                File.WriteAllText(_file, JsonSerializer.Serialize(settings, JsonOptions));
+                Directory.CreateDirectory(_settingsDirectoryPath);
+                File.WriteAllText(
+                    _settingsFilePath, JsonSerializer.Serialize(settings, JsonOptions));
                 Current = settings;
                 _log.Info("Settings saved.");
             }
@@ -108,7 +110,7 @@ public sealed class SettingsStore
         }
         try
         {
-            return _protector.Unprotect(encrypted);
+            return _secretProtector.Unprotect(encrypted);
         }
         catch (Exception ex)
         {
@@ -117,5 +119,5 @@ public sealed class SettingsStore
         }
     }
 
-    public string ProtectApiKey(string apiKey) => _protector.Protect(apiKey);
+    public string ProtectApiKey(string apiKey) => _secretProtector.Protect(apiKey);
 }

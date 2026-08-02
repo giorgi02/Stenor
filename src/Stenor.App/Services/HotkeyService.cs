@@ -23,26 +23,26 @@ namespace Stenor.Services;
 /// </summary>
 public sealed class HotkeyService : IHotkeyService, IDisposable
 {
-    private readonly record struct KeyEvent(int Vk, bool Down);
+    private readonly record struct HookKeyEvent(int VirtualKey, bool IsKeyDown);
 
     // Physical modifier bits (hook thread only).
-    private const int LCtrl = 1 << 0;
-    private const int RCtrl = 1 << 1;
-    private const int LShift = 1 << 2;
-    private const int RShift = 1 << 3;
-    private const int LAlt = 1 << 4;
-    private const int RAlt = 1 << 5;
-    private const int LWin = 1 << 6;
-    private const int RWin = 1 << 7;
+    private const int PhysicalLeftControl = 1 << 0;
+    private const int PhysicalRightControl = 1 << 1;
+    private const int PhysicalLeftShift = 1 << 2;
+    private const int PhysicalRightShift = 1 << 3;
+    private const int PhysicalLeftAlt = 1 << 4;
+    private const int PhysicalRightAlt = 1 << 5;
+    private const int PhysicalLeftWin = 1 << 6;
+    private const int PhysicalRightWin = 1 << 7;
 
     // Generic modifier bits, matching HotkeySpec flags.
-    private const int ModCtrl = 1;
-    private const int ModShift = 2;
-    private const int ModAlt = 4;
-    private const int ModWin = 8;
+    private const int GenericControl = 1;
+    private const int GenericShift = 2;
+    private const int GenericAlt = 4;
+    private const int GenericWin = 8;
 
     private readonly Logger _log;
-    private readonly Channel<KeyEvent> _events = Channel.CreateBounded<KeyEvent>(
+    private readonly Channel<HookKeyEvent> _keyEvents = Channel.CreateBounded<HookKeyEvent>(
         new BoundedChannelOptions(128)
         {
             SingleReader = true,
@@ -50,27 +50,27 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
             FullMode = BoundedChannelFullMode.DropOldest,
         });
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly CancellationTokenSource _shutdownCancellation = new();
 
     // Rooted delegate: the GC must never collect the hook callback.
-    private NativeMethods.LowLevelKeyboardProc? _hookProc;
+    private NativeMethods.LowLevelKeyboardProc? _hookProcedure;
     private Thread? _hookThread;
     private uint _hookThreadId;
-    private nint _hook;
+    private nint _hookHandle;
 
     // --- Hot-path fields read by the hook callback (written via Volatile from other threads).
     private volatile bool _suspended;
-    private int _targetMainVk = HotkeySpec.DefaultVirtualKey;
-    private int _targetMods;          // generic bitmask; 0 for single-key hotkeys
-    private int _swallowCombo;        // 1 when the main key of a matched combo must be swallowed
+    private int _configuredMainVirtualKey = HotkeySpec.DefaultVirtualKey;
+    private int _requiredModifierMask; // 0 for single-key hotkeys
+    private int _shouldSwallowComboMainKey; // 1 when a matched combo's main key must be swallowed
     // --- Hook-thread-only state.
-    private int _physMods;
-    private bool _swallowedMainDown;
+    private int _physicalModifierMask;
+    private bool _swallowedMainKeyDown;
 
     // --- Consumer-thread-only state.
-    private int _streamMods;
-    private bool _mainKeyDown;
-    private bool _pressMatched;
+    private int _eventStreamModifierMask;
+    private bool _isMainKeyDown;
+    private bool _activePressMatched;
     private long _pressTimestamp;
 
     public event Action? Pressed;
@@ -102,7 +102,7 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
         };
         _hookThread.Start();
 
-        if (!ready.Wait(TimeSpan.FromSeconds(5)) || _hook == 0)
+        if (!ready.Wait(TimeSpan.FromSeconds(5)) || _hookHandle == 0)
         {
             _log.Error("Low-level keyboard hook failed to install.");
         }
@@ -111,18 +111,19 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
             _log.Info("Keyboard hook installed.");
         }
 
-        _ = Task.Run(() => ConsumeEventsAsync(_cts.Token));
+        _ = Task.Run(() => ProcessKeyEventsAsync(_shutdownCancellation.Token));
     }
 
     public void UpdateHotkey(HotkeySpec spec)
     {
-        var mods = (spec.Ctrl ? ModCtrl : 0) | (spec.Shift ? ModShift : 0)
-                 | (spec.Alt ? ModAlt : 0) | (spec.Win ? ModWin : 0);
-        Volatile.Write(ref _targetMods, mods);
-        Volatile.Write(ref _targetMainVk, spec.VirtualKey);
+        var modifierMask = (spec.Ctrl ? GenericControl : 0) | (spec.Shift ? GenericShift : 0)
+                         | (spec.Alt ? GenericAlt : 0) | (spec.Win ? GenericWin : 0);
+        Volatile.Write(ref _requiredModifierMask, modifierMask);
+        Volatile.Write(ref _configuredMainVirtualKey, spec.VirtualKey);
         // Only swallow when the hotkey is a real combo whose main key is a printable/non-modifier
         // key. Bare modifiers (default Right Ctrl) must pass through to the OS untouched.
-        Volatile.Write(ref _swallowCombo, mods != 0 && !HotkeySpec.IsModifierKey(spec.VirtualKey) ? 1 : 0);
+        Volatile.Write(ref _shouldSwallowComboMainKey,
+            modifierMask != 0 && !HotkeySpec.IsModifierKey(spec.VirtualKey) ? 1 : 0);
         _log.Info($"Hotkey set to '{HotkeyDisplay.Describe(spec)}'.");
     }
 
@@ -133,12 +134,12 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
         try
         {
             _hookThreadId = NativeMethods.GetCurrentThreadId();
-            _hookProc = HookCallback;
-            _hook = NativeMethods.SetWindowsHookExW(
-                NativeMethods.WH_KEYBOARD_LL, _hookProc, NativeMethods.GetModuleHandleW(null), 0);
+            _hookProcedure = HookCallback;
+            _hookHandle = NativeMethods.SetWindowsHookExW(
+                NativeMethods.WH_KEYBOARD_LL, _hookProcedure, NativeMethods.GetModuleHandleW(null), 0);
             ready.Set();
 
-            if (_hook == 0)
+            if (_hookHandle == 0)
             {
                 return;
             }
@@ -154,10 +155,10 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
         }
         finally
         {
-            if (_hook != 0)
+            if (_hookHandle != 0)
             {
-                NativeMethods.UnhookWindowsHookEx(_hook);
-                _hook = 0;
+                NativeMethods.UnhookWindowsHookEx(_hookHandle);
+                _hookHandle = 0;
             }
         }
     }
@@ -170,71 +171,80 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
             if ((info->flags & NativeMethods.LLKHF_INJECTED) == 0
                 && info->dwExtraInfo != NativeMethods.InjectionSentinel)
             {
-                var msg = (uint)wParam;
-                var down = msg is NativeMethods.WM_KEYDOWN or NativeMethods.WM_SYSKEYDOWN;
-                var up = msg is NativeMethods.WM_KEYUP or NativeMethods.WM_SYSKEYUP;
-                if (down || up)
+                var message = (uint)wParam;
+                var isKeyDown = message is NativeMethods.WM_KEYDOWN or NativeMethods.WM_SYSKEYDOWN;
+                var isKeyUp = message is NativeMethods.WM_KEYUP or NativeMethods.WM_SYSKEYUP;
+                if (isKeyDown || isKeyUp)
                 {
-                    var vk = (int)info->vkCode;
-                    UpdatePhysicalModifiers(vk, down);
-                    _events.Writer.TryWrite(new KeyEvent(vk, down));
+                    var virtualKey = (int)info->vkCode;
+                    UpdatePhysicalModifierMask(virtualKey, isKeyDown);
+                    _keyEvents.Writer.TryWrite(new HookKeyEvent(virtualKey, isKeyDown));
 
-                    if (!_suspended && _swallowCombo == 1 && vk == _targetMainVk)
+                    if (!_suspended && _shouldSwallowComboMainKey == 1
+                        && virtualKey == _configuredMainVirtualKey)
                     {
-                        if (down && GenericMods(_physMods) == _targetMods)
+                        if (isKeyDown
+                            && ToGenericModifierMask(_physicalModifierMask) == _requiredModifierMask)
                         {
-                            _swallowedMainDown = true;
+                            _swallowedMainKeyDown = true;
                             return 1;
                         }
-                        if (up && _swallowedMainDown)
+                        if (isKeyUp && _swallowedMainKeyDown)
                         {
-                            _swallowedMainDown = false;
+                            _swallowedMainKeyDown = false;
                             return 1;
                         }
                     }
                 }
             }
         }
-        return NativeMethods.CallNextHookEx(_hook, nCode, wParam, lParam);
+        return NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
     }
 
-    private void UpdatePhysicalModifiers(int vk, bool down)
+    private void UpdatePhysicalModifierMask(int virtualKey, bool isKeyDown)
     {
-        var bit = vk switch
+        var modifierBit = virtualKey switch
         {
-            VirtualKeys.LeftControl => LCtrl,
-            VirtualKeys.RightControl => RCtrl,
-            VirtualKeys.LeftShift => LShift,
-            VirtualKeys.RightShift => RShift,
-            VirtualKeys.LeftAlt => LAlt,
-            VirtualKeys.RightAlt => RAlt,
-            VirtualKeys.LeftWin => LWin,
-            VirtualKeys.RightWin => RWin,
+            VirtualKeys.LeftControl => PhysicalLeftControl,
+            VirtualKeys.RightControl => PhysicalRightControl,
+            VirtualKeys.LeftShift => PhysicalLeftShift,
+            VirtualKeys.RightShift => PhysicalRightShift,
+            VirtualKeys.LeftAlt => PhysicalLeftAlt,
+            VirtualKeys.RightAlt => PhysicalRightAlt,
+            VirtualKeys.LeftWin => PhysicalLeftWin,
+            VirtualKeys.RightWin => PhysicalRightWin,
             _ => 0,
         };
-        if (bit != 0)
+        if (modifierBit != 0)
         {
-            _physMods = down ? _physMods | bit : _physMods & ~bit;
+            _physicalModifierMask = isKeyDown
+                ? _physicalModifierMask | modifierBit
+                : _physicalModifierMask & ~modifierBit;
         }
     }
 
-    private static int GenericMods(int phys) =>
-        ((phys & (LCtrl | RCtrl)) != 0 ? ModCtrl : 0)
-        | ((phys & (LShift | RShift)) != 0 ? ModShift : 0)
-        | ((phys & (LAlt | RAlt)) != 0 ? ModAlt : 0)
-        | ((phys & (LWin | RWin)) != 0 ? ModWin : 0);
+    private static int ToGenericModifierMask(int physicalModifierMask) =>
+        ((physicalModifierMask & (PhysicalLeftControl | PhysicalRightControl)) != 0
+            ? GenericControl : 0)
+        | ((physicalModifierMask & (PhysicalLeftShift | PhysicalRightShift)) != 0
+            ? GenericShift : 0)
+        | ((physicalModifierMask & (PhysicalLeftAlt | PhysicalRightAlt)) != 0
+            ? GenericAlt : 0)
+        | ((physicalModifierMask & (PhysicalLeftWin | PhysicalRightWin)) != 0
+            ? GenericWin : 0);
 
     // --------------------------------------------------------- consumer task
 
-    private async Task ConsumeEventsAsync(CancellationToken ct)
+    private async Task ProcessKeyEventsAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var e in _events.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var keyEvent in _keyEvents.Reader
+                .ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 try
                 {
-                    HandleEvent(e);
+                    HandleKeyEvent(keyEvent);
                 }
                 catch (Exception ex)
                 {
@@ -247,48 +257,48 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
         }
     }
 
-    private void HandleEvent(KeyEvent e)
+    private void HandleKeyEvent(HookKeyEvent keyEvent)
     {
-        TrackStreamModifiers(e);
+        UpdateEventStreamModifierMask(keyEvent);
 
-        var mainVk = Volatile.Read(ref _targetMainVk);
-        if (e.Vk != mainVk)
+        var configuredMainVirtualKey = Volatile.Read(ref _configuredMainVirtualKey);
+        if (keyEvent.VirtualKey != configuredMainVirtualKey)
         {
             return;
         }
 
-        if (e.Down)
+        if (keyEvent.IsKeyDown)
         {
-            if (_mainKeyDown)
+            if (_isMainKeyDown)
             {
                 return; // keyboard auto-repeat
             }
-            _mainKeyDown = true;
+            _isMainKeyDown = true;
 
             if (_suspended)
             {
                 return;
             }
 
-            var requiredMods = Volatile.Read(ref _targetMods);
-            var isBareOrSingle = requiredMods == 0;
-            if (!isBareOrSingle && _streamMods != requiredMods)
+            var requiredModifierMask = Volatile.Read(ref _requiredModifierMask);
+            var isSingleKeyHotkey = requiredModifierMask == 0;
+            if (!isSingleKeyHotkey && _eventStreamModifierMask != requiredModifierMask)
             {
                 return; // combo pressed with wrong modifiers
             }
 
-            _pressMatched = true;
+            _activePressMatched = true;
             _pressTimestamp = Environment.TickCount64;
             Pressed?.Invoke();
         }
         else
         {
-            _mainKeyDown = false;
-            if (!_pressMatched)
+            _isMainKeyDown = false;
+            if (!_activePressMatched)
             {
                 return;
             }
-            _pressMatched = false;
+            _activePressMatched = false;
 
             if (_suspended)
             {
@@ -298,33 +308,35 @@ public sealed class HotkeyService : IHotkeyService, IDisposable
         }
     }
 
-    private void TrackStreamModifiers(KeyEvent e)
+    private void UpdateEventStreamModifierMask(HookKeyEvent keyEvent)
     {
-        var bit = e.Vk switch
+        var modifierBit = keyEvent.VirtualKey switch
         {
-            VirtualKeys.LeftControl or VirtualKeys.RightControl => ModCtrl,
-            VirtualKeys.LeftShift or VirtualKeys.RightShift => ModShift,
-            VirtualKeys.LeftAlt or VirtualKeys.RightAlt => ModAlt,
-            VirtualKeys.LeftWin or VirtualKeys.RightWin => ModWin,
+            VirtualKeys.LeftControl or VirtualKeys.RightControl => GenericControl,
+            VirtualKeys.LeftShift or VirtualKeys.RightShift => GenericShift,
+            VirtualKeys.LeftAlt or VirtualKeys.RightAlt => GenericAlt,
+            VirtualKeys.LeftWin or VirtualKeys.RightWin => GenericWin,
             _ => 0,
         };
-        if (bit != 0)
+        if (modifierBit != 0)
         {
             // Generic bits are a slight simplification (releasing one of two held Ctrl keys
             // clears the bit), which is harmless for hotkey matching.
-            _streamMods = e.Down ? _streamMods | bit : _streamMods & ~bit;
+            _eventStreamModifierMask = keyEvent.IsKeyDown
+                ? _eventStreamModifierMask | modifierBit
+                : _eventStreamModifierMask & ~modifierBit;
         }
     }
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _events.Writer.TryComplete();
+        _shutdownCancellation.Cancel();
+        _keyEvents.Writer.TryComplete();
         if (_hookThreadId != 0)
         {
             NativeMethods.PostThreadMessageW(_hookThreadId, NativeMethods.WM_QUIT, 0, 0);
         }
         _hookThread?.Join(TimeSpan.FromSeconds(2));
-        _cts.Dispose();
+        _shutdownCancellation.Dispose();
     }
 }

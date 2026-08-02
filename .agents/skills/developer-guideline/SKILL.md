@@ -1,15 +1,13 @@
 ---
-name: karpathy-guideline
-description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
+name: developer-guideline
+description: Use before writing, changing, reviewing, or refactoring code. Helps prevent silent assumptions, unnecessary complexity, scope creep, unintended breaking changes, and unverified completion claims.
 ---
 
-# Karpathy Guidelines
+# Developer Guidelines
 
-Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.
+Bias toward caution over speed. For trivial tasks, use judgment.
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
-## 1. Think Before Coding
+## 1. Understand Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
@@ -52,9 +50,9 @@ The test: Every changed line should trace directly to the user's request.
 **Define success criteria. Loop until verified.**
 
 Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
+- "Add validation" → "List the inputs that must be rejected, run the code, confirm they are"
+- "Fix the bug" → "Reproduce it first, then confirm the same steps no longer fail"
+- "Refactor X" → "Confirm behavior is identical before and after"
 
 For multi-step tasks, state a brief plan:
 ```
@@ -64,3 +62,7 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## 5. Report Precisely
+
+Summarize what changed, why, how it was verified, and any remaining risk or limitation. Never describe planned work as completed work — a false "done" costs more trust than an honest "not yet".

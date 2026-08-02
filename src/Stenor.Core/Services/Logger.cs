@@ -12,15 +12,15 @@ public sealed class Logger
     private const long MaxFileBytes = 512 * 1024;
     private const int MaxArchivedFiles = 3;
 
-    private readonly object _sync = new();
-    private readonly string _directory;
-    private readonly string _file;
+    private readonly object _syncRoot = new();
+    private readonly string _logDirectoryPath;
+    private readonly string _logFilePath;
 
     public Logger()
     {
-        _directory = Path.Combine(
+        _logDirectoryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Stenor", "logs");
-        _file = Path.Combine(_directory, "stenor.log");
+        _logFilePath = Path.Combine(_logDirectoryPath, "stenor.log");
     }
 
     public void Info(string message) => Write("INF", message, null);
@@ -33,9 +33,9 @@ public sealed class Logger
     {
         try
         {
-            lock (_sync)
+            lock (_syncRoot)
             {
-                Directory.CreateDirectory(_directory);
+                Directory.CreateDirectory(_logDirectoryPath);
                 RotateIfNeeded();
                 var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}";
                 if (ex is not null)
@@ -46,7 +46,7 @@ public sealed class Logger
                         line += Environment.NewLine + st;
                     }
                 }
-                File.AppendAllText(_file, line + Environment.NewLine);
+                File.AppendAllText(_logFilePath, line + Environment.NewLine);
             }
         }
         catch
@@ -57,23 +57,25 @@ public sealed class Logger
 
     private void RotateIfNeeded()
     {
-        var info = new FileInfo(_file);
-        if (!info.Exists || info.Length < MaxFileBytes)
+        var logFileInfo = new FileInfo(_logFilePath);
+        if (!logFileInfo.Exists || logFileInfo.Length < MaxFileBytes)
         {
             return;
         }
 
         for (var i = MaxArchivedFiles; i >= 1; i--)
         {
-            var src = i == 1 ? _file : Path.Combine(_directory, $"stenor.{i - 1}.log");
-            var dst = Path.Combine(_directory, $"stenor.{i}.log");
-            if (File.Exists(dst))
+            var sourcePath = i == 1
+                ? _logFilePath
+                : Path.Combine(_logDirectoryPath, $"stenor.{i - 1}.log");
+            var destinationPath = Path.Combine(_logDirectoryPath, $"stenor.{i}.log");
+            if (File.Exists(destinationPath))
             {
-                File.Delete(dst);
+                File.Delete(destinationPath);
             }
-            if (File.Exists(src))
+            if (File.Exists(sourcePath))
             {
-                File.Move(src, dst);
+                File.Move(sourcePath, destinationPath);
             }
         }
     }

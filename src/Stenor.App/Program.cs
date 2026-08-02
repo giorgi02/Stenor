@@ -13,7 +13,7 @@ public static class Program
 
         // Before anything opens a managed socket (Gemini, update check): may set the
         // process-wide DisableIPv6 switch, which .NET latches on first socket use.
-        NetworkGuard.ApplyIpv4FallbackIfNeeded();
+        NetworkGuard.ConfigureIpv4Preference();
 
         var app = new App();
         app.InitializeComponent();

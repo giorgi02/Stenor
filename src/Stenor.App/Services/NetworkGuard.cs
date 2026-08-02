@@ -38,20 +38,22 @@ internal static class NetworkGuard
     public static string Summary { get; private set; } = "not run";
 
     /// <summary>Never throws: on any failure the process keeps .NET's default behavior.</summary>
-    public static void ApplyIpv4FallbackIfNeeded()
+    public static void ConfigureIpv4Preference()
     {
         try
         {
-            var resolve = Dns.GetHostAddressesAsync(ProbeHost);
-            if (!resolve.Wait(DnsTimeout))
+            var dnsLookupTask = Dns.GetHostAddressesAsync(ProbeHost);
+            if (!dnsLookupTask.Wait(DnsTimeout))
             {
                 Summary = "DNS probe timed out; defaults kept";
                 return;
             }
-            var addresses = resolve.Result;
-            var v6 = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetworkV6);
-            var v4 = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetwork);
-            if (v6 is null || v4 is null)
+            var addresses = dnsLookupTask.Result;
+            var ipv6Address = Array.Find(addresses,
+                address => address.AddressFamily == AddressFamily.InterNetworkV6);
+            var ipv4Address = Array.Find(addresses,
+                address => address.AddressFamily == AddressFamily.InterNetwork);
+            if (ipv6Address is null || ipv4Address is null)
             {
                 Summary = "single-stack network; defaults kept";
                 return;
@@ -59,19 +61,21 @@ internal static class NetworkGuard
 
             // On a healthy network both probes return in well under a second; the full
             // ProbeTimeout is only ever paid when something is actually broken.
-            var v6Probe = Task.Run(() => CanConnectTcp(v6, ProbePort, ProbeTimeout));
-            var v4Probe = Task.Run(() => CanConnectTcp(v4, ProbePort, ProbeTimeout));
-            Task.WaitAll(v6Probe, v4Probe);
+            var ipv6ProbeTask = Task.Run(
+                () => CanConnectTcp(ipv6Address, ProbePort, ProbeTimeout));
+            var ipv4ProbeTask = Task.Run(
+                () => CanConnectTcp(ipv4Address, ProbePort, ProbeTimeout));
+            Task.WaitAll(ipv6ProbeTask, ipv4ProbeTask);
 
-            if (v4Probe.Result)
+            if (ipv4ProbeTask.Result)
             {
                 AppContext.SetSwitch("System.Net.DisableIPv6", true);
-                Summary = v6Probe.Result
+                Summary = ipv6ProbeTask.Result
                     ? "IPv4 OK (IPv6 also OK); IPv4-only for this session"
                     : "IPv6 unreachable, IPv4 OK; IPv4-only for this session";
                 return;
             }
-            Summary = $"IPv4 unreachable (IPv6={v6Probe.Result}); defaults kept";
+            Summary = $"IPv4 unreachable (IPv6={ipv6ProbeTask.Result}); defaults kept";
         }
         catch (Exception ex)
         {
@@ -104,27 +108,31 @@ internal static class NetworkGuard
                 {
                     return false;
                 }
-                var sockaddr = BuildSockaddr(address, port);
-                var rc = NativeMethods.connect(socket, sockaddr, sockaddr.Length);
-                if (rc == 0)
+                var socketAddress = BuildSocketAddress(address, port);
+                var connectResult = NativeMethods.connect(
+                    socket, socketAddress, socketAddress.Length);
+                if (connectResult == 0)
                 {
                     return true; // connected synchronously
                 }
-                if (rc == NativeMethods.SOCKET_ERROR
+                if (connectResult == NativeMethods.SOCKET_ERROR
                     && Marshal.GetLastPInvokeError() != NativeMethods.WSAEWOULDBLOCK)
                 {
                     return false;
                 }
 
-                var write = new NativeMethods.FD_SET_SINGLE { fd_count = 1, fd_socket = socket };
-                var except = new NativeMethods.FD_SET_SINGLE { fd_count = 1, fd_socket = socket };
-                var tv = new NativeMethods.TIMEVAL
+                var writableSockets = new NativeMethods.FD_SET_SINGLE
+                    { fd_count = 1, fd_socket = socket };
+                var errorSockets = new NativeMethods.FD_SET_SINGLE
+                    { fd_count = 1, fd_socket = socket };
+                var selectTimeout = new NativeMethods.TIMEVAL
                 {
                     tv_sec = (int)timeout.TotalSeconds,
                     tv_usec = (int)(timeout.TotalMilliseconds % 1000 * 1000),
                 };
-                var ready = NativeMethods.select(0, 0, ref write, ref except, ref tv);
-                return ready > 0 && write.fd_count > 0;
+                var readySocketCount = NativeMethods.select(
+                    0, 0, ref writableSockets, ref errorSockets, ref selectTimeout);
+                return readySocketCount > 0 && writableSockets.fd_count > 0;
             }
             finally
             {
@@ -137,24 +145,24 @@ internal static class NetworkGuard
         }
     }
 
-    private static byte[] BuildSockaddr(IPAddress address, int port)
+    private static byte[] BuildSocketAddress(IPAddress address, int port)
     {
         var addressBytes = address.GetAddressBytes();
         if (address.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            var sa = new byte[28]; // sockaddr_in6: family, port, flowinfo, address, scope id
-            sa[0] = NativeMethods.AF_INET6;
-            sa[2] = (byte)(port >> 8);
-            sa[3] = (byte)port;
-            addressBytes.CopyTo(sa, 8);
-            BitConverter.GetBytes((uint)address.ScopeId).CopyTo(sa, 24);
-            return sa;
+            var ipv6SocketAddress = new byte[28]; // sockaddr_in6: family, port, flowinfo, address, scope id
+            ipv6SocketAddress[0] = NativeMethods.AF_INET6;
+            ipv6SocketAddress[2] = (byte)(port >> 8);
+            ipv6SocketAddress[3] = (byte)port;
+            addressBytes.CopyTo(ipv6SocketAddress, 8);
+            BitConverter.GetBytes((uint)address.ScopeId).CopyTo(ipv6SocketAddress, 24);
+            return ipv6SocketAddress;
         }
-        var sa4 = new byte[16]; // sockaddr_in: family, port, address, zero padding
-        sa4[0] = NativeMethods.AF_INET;
-        sa4[2] = (byte)(port >> 8);
-        sa4[3] = (byte)port;
-        addressBytes.CopyTo(sa4, 4);
-        return sa4;
+        var socketAddress = new byte[16]; // sockaddr_in: family, port, address, zero padding
+        socketAddress[0] = NativeMethods.AF_INET;
+        socketAddress[2] = (byte)(port >> 8);
+        socketAddress[3] = (byte)port;
+        addressBytes.CopyTo(socketAddress, 4);
+        return socketAddress;
     }
 }

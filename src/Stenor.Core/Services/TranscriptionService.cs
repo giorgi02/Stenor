@@ -12,17 +12,17 @@ namespace Stenor.Services;
 /// </summary>
 public sealed class TranscriptionService
 {
-    public const string Model = "gemini-3.1-flash-lite";
+    public const string ModelId = "gemini-3.1-flash-lite";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
     private static readonly Lazy<string> PromptTemplate = new(LoadPromptTemplate);
 
     private readonly Logger _log;
-    private readonly GeminiClientProvider _clients;
+    private readonly GeminiClientProvider _clientProvider;
 
-    public TranscriptionService(Logger log, GeminiClientProvider clients)
+    public TranscriptionService(Logger log, GeminiClientProvider clientProvider)
     {
         _log = log;
-        _clients = clients;
+        _clientProvider = clientProvider;
     }
 
     /// <summary>Thrown for failures with a user-presentable message.</summary>
@@ -54,14 +54,14 @@ public sealed class TranscriptionService
         {
             // Fetched per attempt: a settings save mid-request invalidates the cached client,
             // so the retry must not reuse the stale instance.
-            var client = _clients.GetClient()
+            var client = _clientProvider.GetClient()
                 ?? throw new TranscriptionException("No API key configured. Open Settings to add one.");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(RequestTimeout);
             try
             {
                 var response = await client.Models
-                    .GenerateContentAsync(Model, content, config, timeout.Token)
+                    .GenerateContentAsync(ModelId, content, config, timeout.Token)
                     .ConfigureAwait(false);
                 return ExtractText(response);
             }
@@ -87,7 +87,8 @@ public sealed class TranscriptionService
     }
 
     /// <summary>Tiny text-only call used by the Settings "Test key" button.</summary>
-    public async Task<(bool Ok, string Message)> TestKeyAsync(string apiKey, CancellationToken ct)
+    public async Task<(bool IsValid, string Message)> TestKeyAsync(
+        string apiKey, CancellationToken ct)
     {
         try
         {
@@ -95,7 +96,8 @@ public sealed class TranscriptionService
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(15));
             var config = new GenerateContentConfig { MaxOutputTokens = 5 };
-            await client.Models.GenerateContentAsync(Model, "Say OK", config, timeout.Token).ConfigureAwait(false);
+            await client.Models.GenerateContentAsync(
+                ModelId, "Say OK", config, timeout.Token).ConfigureAwait(false);
             return (true, "Key works.");
         }
         catch (ClientError)

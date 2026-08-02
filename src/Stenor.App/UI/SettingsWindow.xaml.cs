@@ -16,36 +16,36 @@ namespace Stenor.UI;
 /// </summary>
 public partial class SettingsWindow : Window
 {
-    private readonly SettingsStore _settings;
-    private readonly TranscriptionService _transcription;
-    private readonly HotkeyService _hotkeys;
+    private readonly SettingsStore _settingsStore;
+    private readonly TranscriptionService _transcriptionService;
+    private readonly HotkeyService _hotkeyService;
     private readonly Logger _log;
 
-    private readonly Dictionary<string, CheckBox> _languageChecks = [];
+    private readonly Dictionary<string, CheckBox> _languageCheckBoxes = [];
     private Border? _checkedGroupSeparator;
 
     private HotkeySpec _selectedHotkey;
-    private bool _capturingHotkey;
-    private bool _syncingKeyBoxes;
-    private bool _syncingLanguageChecks;
-    private DateTime _languagesPopupClosedAt;
-    private CancellationTokenSource? _testCts;
+    private bool _isCapturingHotkey;
+    private bool _isSyncingApiKeyFields;
+    private bool _isSyncingLanguageSelection;
+    private DateTime _languagePopupClosedAt;
+    private CancellationTokenSource? _apiKeyTestCancellation;
     private nint _taskbarIconHandle;
 
     public SettingsWindow(SettingsStore settings, TranscriptionService transcription,
         HotkeyService hotkeys, Logger log)
     {
-        _settings = settings;
-        _transcription = transcription;
-        _hotkeys = hotkeys;
+        _settingsStore = settings;
+        _transcriptionService = transcription;
+        _hotkeyService = hotkeys;
         _log = log;
 
         InitializeComponent();
         var version = typeof(SettingsWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
         Title = $"Stenor Settings — v{version}";
 
-        var current = _settings.Current;
-        ApiKeyBox.Password = _settings.GetApiKey() ?? string.Empty;
+        var current = _settingsStore.Current;
+        ApiKeyBox.Password = _settingsStore.GetApiKey() ?? string.Empty;
         BuildLanguageList(current.SpokenLanguages);
         _selectedHotkey = current.Hotkey.Clone();
         HotkeyButton.Content = HotkeyDisplay.Describe(_selectedHotkey);
@@ -65,8 +65,8 @@ public partial class SettingsWindow : Window
 
     private void OnClosedCleanup(object? sender, EventArgs e)
     {
-        _testCts?.Cancel();
-        if (_capturingHotkey)
+        _apiKeyTestCancellation?.Cancel();
+        if (_isCapturingHotkey)
         {
             EndHotkeyCapture(null);
         }
@@ -102,7 +102,7 @@ public partial class SettingsWindow : Window
 
     private void OnApiKeyChanged(object sender, RoutedEventArgs e)
     {
-        if (!_syncingKeyBoxes)
+        if (!_isSyncingApiKeyFields)
         {
             HideValidation();
         }
@@ -110,7 +110,7 @@ public partial class SettingsWindow : Window
 
     private void OnApiKeyVisibleChanged(object sender, RoutedEventArgs e)
     {
-        if (!_syncingKeyBoxes)
+        if (!_isSyncingApiKeyFields)
         {
             HideValidation();
         }
@@ -118,14 +118,14 @@ public partial class SettingsWindow : Window
 
     private void SyncKeyBoxes(Action sync)
     {
-        _syncingKeyBoxes = true;
+        _isSyncingApiKeyFields = true;
         try
         {
             sync();
         }
         finally
         {
-            _syncingKeyBoxes = false;
+            _isSyncingApiKeyFields = false;
         }
     }
 
@@ -140,12 +140,13 @@ public partial class SettingsWindow : Window
 
         TestKeyButton.IsEnabled = false;
         ShowTestResult(null, "Testing…");
-        _testCts?.Cancel();
-        _testCts = new CancellationTokenSource();
+        _apiKeyTestCancellation?.Cancel();
+        _apiKeyTestCancellation = new CancellationTokenSource();
         try
         {
-            var (ok, message) = await _transcription.TestKeyAsync(key, _testCts.Token);
-            ShowTestResult(ok, message);
+            var (isValid, message) = await _transcriptionService.TestKeyAsync(
+                key, _apiKeyTestCancellation.Token);
+            ShowTestResult(isValid, message);
         }
         catch (Exception ex)
         {
@@ -158,10 +159,10 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void ShowTestResult(bool? ok, string message)
+    private void ShowTestResult(bool? isValid, string message)
     {
         TestResultText.Text = message;
-        TestResultText.Foreground = ok switch
+        TestResultText.Foreground = isValid switch
         {
             true => (Brush)FindResource("OkBrush"),
             false => (Brush)FindResource("DangerBrush"),
@@ -186,9 +187,9 @@ public partial class SettingsWindow : Window
             };
             check.Checked += OnLanguageChecked;
             check.Unchecked += OnLanguageUnchecked;
-            _languageChecks.Add(language, check);
+            _languageCheckBoxes.Add(language, check);
         }
-        AutoDetectCheck.IsChecked = SelectedLanguages().Count == 0;
+        AutoDetectCheck.IsChecked = GetSelectedLanguages().Count == 0;
         ReorderLanguageList();
         UpdateLanguagesSummary();
     }
@@ -198,11 +199,13 @@ public partial class SettingsWindow : Window
     private void ReorderLanguageList()
     {
         LanguagesPanel.Children.Clear();
-        foreach (var language in LanguageCatalog.All.Where(l => _languageChecks[l].IsChecked == true))
+        foreach (var language in LanguageCatalog.All.Where(
+            language => _languageCheckBoxes[language].IsChecked == true))
         {
-            LanguagesPanel.Children.Add(_languageChecks[language]);
+            LanguagesPanel.Children.Add(_languageCheckBoxes[language]);
         }
-        if (LanguagesPanel.Children.Count > 0 && LanguagesPanel.Children.Count < _languageChecks.Count)
+        if (LanguagesPanel.Children.Count > 0
+            && LanguagesPanel.Children.Count < _languageCheckBoxes.Count)
         {
             _checkedGroupSeparator ??= new Border
             {
@@ -212,24 +215,26 @@ public partial class SettingsWindow : Window
             };
             LanguagesPanel.Children.Add(_checkedGroupSeparator);
         }
-        foreach (var language in LanguageCatalog.All.Where(l => _languageChecks[l].IsChecked != true))
+        foreach (var language in LanguageCatalog.All.Where(
+            language => _languageCheckBoxes[language].IsChecked != true))
         {
-            LanguagesPanel.Children.Add(_languageChecks[language]);
+            LanguagesPanel.Children.Add(_languageCheckBoxes[language]);
         }
     }
 
-    private List<string> SelectedLanguages() =>
-        [.. LanguageCatalog.All.Where(l => _languageChecks[l].IsChecked == true)];
+    private List<string> GetSelectedLanguages() =>
+        [.. LanguageCatalog.All.Where(
+            language => _languageCheckBoxes[language].IsChecked == true)];
 
     private void UpdateLanguagesSummary()
     {
-        var selected = SelectedLanguages();
+        var selected = GetSelectedLanguages();
         LanguagesSummary.Text = selected.Count == 0 ? "Auto-detect" : string.Join(", ", selected);
     }
 
     private void OnLanguageChecked(object sender, RoutedEventArgs e)
     {
-        if (_syncingLanguageChecks)
+        if (_isSyncingLanguageSelection)
         {
             return;
         }
@@ -239,11 +244,11 @@ public partial class SettingsWindow : Window
 
     private void OnLanguageUnchecked(object sender, RoutedEventArgs e)
     {
-        if (_syncingLanguageChecks)
+        if (_isSyncingLanguageSelection)
         {
             return;
         }
-        if (SelectedLanguages().Count == 0)
+        if (GetSelectedLanguages().Count == 0)
         {
             SyncLanguageChecks(() => AutoDetectCheck.IsChecked = true);
         }
@@ -252,13 +257,13 @@ public partial class SettingsWindow : Window
 
     private void OnAutoDetectChecked(object sender, RoutedEventArgs e)
     {
-        if (_syncingLanguageChecks)
+        if (_isSyncingLanguageSelection)
         {
             return;
         }
         SyncLanguageChecks(() =>
         {
-            foreach (var check in _languageChecks.Values)
+            foreach (var check in _languageCheckBoxes.Values)
             {
                 check.IsChecked = false;
             }
@@ -270,7 +275,7 @@ public partial class SettingsWindow : Window
     {
         // Auto-detect only turns off by picking a language; unchecking it directly would
         // leave nothing selected, so snap it back on.
-        if (!_syncingLanguageChecks && SelectedLanguages().Count == 0)
+        if (!_isSyncingLanguageSelection && GetSelectedLanguages().Count == 0)
         {
             SyncLanguageChecks(() => AutoDetectCheck.IsChecked = true);
         }
@@ -278,14 +283,14 @@ public partial class SettingsWindow : Window
 
     private void SyncLanguageChecks(Action sync)
     {
-        _syncingLanguageChecks = true;
+        _isSyncingLanguageSelection = true;
         try
         {
             sync();
         }
         finally
         {
-            _syncingLanguageChecks = false;
+            _isSyncingLanguageSelection = false;
         }
     }
 
@@ -296,13 +301,13 @@ public partial class SettingsWindow : Window
     }
 
     private void OnLanguagesPopupClosed(object? sender, EventArgs e) =>
-        _languagesPopupClosedAt = DateTime.UtcNow;
+        _languagePopupClosedAt = DateTime.UtcNow;
 
     private void OnLanguagesToggleMouseDown(object sender, MouseButtonEventArgs e)
     {
         // Clicking the toggle while the popup is open first closes it via StaysOpen=False;
         // swallow that same click so it does not immediately reopen the popup.
-        if ((DateTime.UtcNow - _languagesPopupClosedAt) < TimeSpan.FromMilliseconds(250))
+        if ((DateTime.UtcNow - _languagePopupClosedAt) < TimeSpan.FromMilliseconds(250))
         {
             e.Handled = true;
         }
@@ -312,12 +317,12 @@ public partial class SettingsWindow : Window
 
     private void OnHotkeyButtonClick(object sender, RoutedEventArgs e)
     {
-        if (_capturingHotkey)
+        if (_isCapturingHotkey)
         {
             return;
         }
-        _capturingHotkey = true;
-        _hotkeys.Suspended = true;
+        _isCapturingHotkey = true;
+        _hotkeyService.Suspended = true;
         HotkeyButton.Content = "Press a key or combo…";
         PreviewKeyDown += OnCaptureKeyDown;
         PreviewKeyUp += OnCaptureKeyUp;
@@ -366,8 +371,8 @@ public partial class SettingsWindow : Window
     {
         PreviewKeyDown -= OnCaptureKeyDown;
         PreviewKeyUp -= OnCaptureKeyUp;
-        _capturingHotkey = false;
-        _hotkeys.Suspended = false;
+        _isCapturingHotkey = false;
+        _hotkeyService.Suspended = false;
         if (captured is not null)
         {
             _selectedHotkey = captured;
@@ -419,14 +424,14 @@ public partial class SettingsWindow : Window
 
         try
         {
-            var updated = _settings.Current.Clone();
-            updated.ApiKeyEncrypted = _settings.ProtectApiKey(key);
-            updated.SpokenLanguages = SelectedLanguages();
+            var updated = _settingsStore.Current.Clone();
+            updated.ApiKeyEncrypted = _settingsStore.ProtectApiKey(key);
+            updated.SpokenLanguages = GetSelectedLanguages();
             updated.Hotkey = _selectedHotkey;
             updated.ActivationMode = ToggleRadio.IsChecked == true ? ActivationMode.Toggle : ActivationMode.Hold;
             updated.LaunchAtStartup = StartupCheck.IsChecked == true;
             updated.LiveTyping = LiveTypingCheck.IsChecked == true;
-            _settings.Save(updated);
+            _settingsStore.Save(updated);
             Close();
         }
         catch (Exception ex)

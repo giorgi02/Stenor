@@ -15,9 +15,9 @@ namespace Stenor.Services;
 public sealed class GeminiClientProvider : IDisposable
 {
     private readonly SettingsStore _settings;
-    private readonly object _sync = new();
-    private Client? _client;
-    private string? _clientKey;
+    private readonly object _syncRoot = new();
+    private Client? _cachedClient;
+    private string? _cachedApiKey;
 
     public GeminiClientProvider(SettingsStore settings)
     {
@@ -28,22 +28,23 @@ public sealed class GeminiClientProvider : IDisposable
     /// <summary>Returns the cached client, or null when no API key is configured.</summary>
     public Client? GetClient()
     {
-        var key = _settings.GetApiKey();
-        if (string.IsNullOrWhiteSpace(key))
+        var apiKey = _settings.GetApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
             return null;
         }
-        lock (_sync)
+        lock (_syncRoot)
         {
-            if (_client is null || _clientKey != key)
+            if (_cachedClient is null || _cachedApiKey != apiKey)
             {
                 // The replaced client is dropped, never disposed: a transcription may still be
                 // mid-request on it, and disposing the underlying HttpClient aborts that call.
                 // The GC reclaims it once the in-flight request completes.
-                _client = new Client(apiKey: key, clientOptions: Ipv4FirstClientOptions);
-                _clientKey = key;
+                _cachedClient = new Client(
+                    apiKey: apiKey, clientOptions: Ipv4FirstClientOptions);
+                _cachedApiKey = apiKey;
             }
-            return _client;
+            return _cachedClient;
         }
     }
 
@@ -114,38 +115,40 @@ public sealed class GeminiClientProvider : IDisposable
     /// other family is tried — never a whole family's worth of timeouts.</summary>
     private static IEnumerable<IPAddress> OrderPreferredFirst(IPAddress[] addresses, AddressFamily preferred)
     {
-        var first = addresses.Where(a => a.AddressFamily == preferred).ToArray();
-        var rest = addresses.Where(a => a.AddressFamily != preferred).ToArray();
-        for (var i = 0; i < Math.Max(first.Length, rest.Length); i++)
+        var preferredAddresses = addresses
+            .Where(address => address.AddressFamily == preferred).ToArray();
+        var otherAddresses = addresses
+            .Where(address => address.AddressFamily != preferred).ToArray();
+        for (var i = 0; i < Math.Max(preferredAddresses.Length, otherAddresses.Length); i++)
         {
-            if (i < first.Length)
+            if (i < preferredAddresses.Length)
             {
-                yield return first[i];
+                yield return preferredAddresses[i];
             }
-            if (i < rest.Length)
+            if (i < otherAddresses.Length)
             {
-                yield return rest[i];
+                yield return otherAddresses[i];
             }
         }
     }
 
     private void InvalidateClient()
     {
-        lock (_sync)
+        lock (_syncRoot)
         {
-            _client = null; // dropped, not disposed - see GetClient
-            _clientKey = null;
+            _cachedClient = null; // dropped, not disposed - see GetClient
+            _cachedApiKey = null;
         }
     }
 
     public void Dispose()
     {
         _settings.Changed -= InvalidateClient;
-        lock (_sync)
+        lock (_syncRoot)
         {
-            _client?.Dispose(); // process shutdown: no request left to abort
-            _client = null;
-            _clientKey = null;
+            _cachedClient?.Dispose(); // process shutdown: no request left to abort
+            _cachedClient = null;
+            _cachedApiKey = null;
         }
     }
 }

@@ -17,16 +17,16 @@ namespace Stenor.Services;
 /// </summary>
 public sealed class LiveTranscriptionService
 {
-    public const string Model = "gemini-3.1-flash-live-preview";
+    public const string ModelId = "gemini-3.1-flash-live-preview";
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
     private readonly Logger _log;
-    private readonly GeminiClientProvider _clients;
+    private readonly GeminiClientProvider _clientProvider;
 
-    public LiveTranscriptionService(Logger log, GeminiClientProvider clients)
+    public LiveTranscriptionService(Logger log, GeminiClientProvider clientProvider)
     {
         _log = log;
-        _clients = clients;
+        _clientProvider = clientProvider;
     }
 
     /// <summary>Thrown for failures with a user-presentable message.</summary>
@@ -36,7 +36,7 @@ public sealed class LiveTranscriptionService
     /// <summary>Connects a live session configured for transcription and signals ActivityStart.</summary>
     public async Task<Session> ConnectAsync(IReadOnlyList<string> spokenLanguages, CancellationToken ct)
     {
-        var client = _clients.GetClient()
+        var client = _clientProvider.GetClient()
             ?? throw new LiveTranscriptionException("No API key configured. Open Settings to add one.");
 
         var config = new LiveConnectConfig
@@ -66,7 +66,8 @@ public sealed class LiveTranscriptionService
         {
             // ConnectAsync reads the SetupComplete handshake itself, so bad keys and rejected
             // configs already fail here.
-            var session = await client.Live.ConnectAsync(Model, config, timeout.Token).ConfigureAwait(false);
+            var session = await client.Live.ConnectAsync(
+                ModelId, config, timeout.Token).ConfigureAwait(false);
             return new Session(session, _log);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

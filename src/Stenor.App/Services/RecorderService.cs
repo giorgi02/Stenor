@@ -28,20 +28,20 @@ public sealed class RecorderService : IRecorderService, IDisposable
     private readonly object _sync = new();
     private readonly ManualResetEventSlim _stopCompleted = new(false);
 
-    private WasapiCapture? _capture;
+    private WasapiCapture? _audioCapture;
     private MMDeviceEnumerator? _deviceEnumerator;
-    private DeviceNotificationClient? _notificationClient;
+    private DeviceNotificationClient? _deviceNotificationClient;
     private volatile bool _defaultDeviceChanged;
 
     // Per-recording session (guarded by _sync).
-    private BufferedWaveProvider? _buffered;
-    private ISampleProvider? _pipeline;
+    private BufferedWaveProvider? _captureBuffer;
+    private ISampleProvider? _resamplingPipeline;
     private MemoryStream? _wavStream;
-    private WaveFileWriter? _writer;
-    private System.Threading.Timer? _maxTimer;
+    private WaveFileWriter? _waveWriter;
+    private System.Threading.Timer? _maxDurationTimer;
     private volatile bool _recording;
-    private volatile float _lastLevel;
-    private readonly float[] _drainBuffer = new float[8192];
+    private volatile float _currentLevel;
+    private readonly float[] _sampleBuffer = new float[8192];
 
     public event Action? MaxDurationReached;
     public event Action<string>? Failed;
@@ -50,7 +50,7 @@ public sealed class RecorderService : IRecorderService, IDisposable
     public RecorderService(Logger log) => _log = log;
 
     /// <summary>Latest peak level (0..1) of the mono 16 kHz stream; polled by the overlay.</summary>
-    public float CurrentLevel => _lastLevel;
+    public float CurrentLevel => _currentLevel;
 
     /// <summary>Initializes the capture device and runs one throwaway start/stop cycle.
     /// Call from a background thread (never the UI thread) at app start.</summary>
@@ -63,9 +63,9 @@ public sealed class RecorderService : IRecorderService, IDisposable
                 EnsureCapture();
             }
             _stopCompleted.Reset();
-            _capture!.StartRecording();
+            _audioCapture!.StartRecording();
             Thread.Sleep(150);
-            _capture.StopRecording();
+            _audioCapture.StopRecording();
             _stopCompleted.Wait(TimeSpan.FromSeconds(1));
             _log.Info("Audio capture primed.");
         }
@@ -103,33 +103,33 @@ public sealed class RecorderService : IRecorderService, IDisposable
                 throw new InvalidOperationException("No microphone available.", ex);
             }
 
-            var sourceFormat = _capture!.WaveFormat;
-            _buffered = new BufferedWaveProvider(sourceFormat)
+            var sourceFormat = _audioCapture!.WaveFormat;
+            _captureBuffer = new BufferedWaveProvider(sourceFormat)
             {
                 ReadFully = false, // never pad with silence; Read returns only real samples
                 DiscardOnBufferOverflow = true,
                 BufferDuration = TimeSpan.FromSeconds(5),
             };
-            ISampleProvider samples = _buffered.ToSampleProvider();
+            ISampleProvider samples = _captureBuffer.ToSampleProvider();
             if (sourceFormat.Channels > 1)
             {
                 samples = sourceFormat.Channels == 2
                     ? new StereoToMonoSampleProvider(samples) { LeftVolume = 0.5f, RightVolume = 0.5f }
-                    : new AnyToMonoSampleProvider(samples);
+                    : new MultichannelToMonoSampleProvider(samples);
             }
-            _pipeline = new WdlResamplingSampleProvider(samples, PcmFormat.SampleRateHz);
+            _resamplingPipeline = new WdlResamplingSampleProvider(samples, PcmFormat.SampleRateHz);
 
             _wavStream = new MemoryStream();
-            _writer = new WaveFileWriter(new IgnoreDisposeStream(_wavStream),
+            _waveWriter = new WaveFileWriter(new IgnoreDisposeStream(_wavStream),
                 new WaveFormat(PcmFormat.SampleRateHz, PcmFormat.BitsPerSample, PcmFormat.ChannelCount));
-            _lastLevel = 0f;
+            _currentLevel = 0f;
             _stopCompleted.Reset();
             _recording = true;
         }
 
         try
         {
-            _capture!.StartRecording();
+            _audioCapture!.StartRecording();
         }
         catch (Exception ex)
         {
@@ -150,7 +150,7 @@ public sealed class RecorderService : IRecorderService, IDisposable
             }
             try
             {
-                _capture!.StartRecording();
+                _audioCapture!.StartRecording();
             }
             catch (Exception retryEx)
             {
@@ -163,17 +163,17 @@ public sealed class RecorderService : IRecorderService, IDisposable
             }
         }
 
-        _maxTimer = new System.Threading.Timer(
+        _maxDurationTimer = new System.Threading.Timer(
             _ => MaxDurationReached?.Invoke(), null, MaxRecordingDuration, Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>Stops recording and returns the finished WAV, or null when nothing was captured.</summary>
-    public byte[]? Stop() => StopCore(discard: false);
+    public byte[]? Stop() => StopRecording(discardAudio: false);
 
     /// <summary>Stops recording and discards the audio.</summary>
-    public void Cancel() => StopCore(discard: true);
+    public void Cancel() => StopRecording(discardAudio: true);
 
-    private byte[]? StopCore(bool discard)
+    private byte[]? StopRecording(bool discardAudio)
     {
         lock (_sync)
         {
@@ -182,13 +182,13 @@ public sealed class RecorderService : IRecorderService, IDisposable
                 return null;
             }
             _recording = false; // DataAvailable stops writing from here on
-            _maxTimer?.Dispose();
-            _maxTimer = null;
+            _maxDurationTimer?.Dispose();
+            _maxDurationTimer = null;
         }
 
         try
         {
-            _capture?.StopRecording();
+            _audioCapture?.StopRecording();
             _stopCompleted.Wait(TimeSpan.FromMilliseconds(750));
         }
         catch (Exception ex)
@@ -199,10 +199,10 @@ public sealed class RecorderService : IRecorderService, IDisposable
         lock (_sync)
         {
             byte[]? wav = null;
-            if (!discard && _writer is not null && _wavStream is not null)
+            if (!discardAudio && _waveWriter is not null && _wavStream is not null)
             {
-                _writer.Dispose(); // finalizes the WAV header; IgnoreDisposeStream keeps the stream
-                _writer = null;
+                _waveWriter.Dispose(); // finalizes the WAV header; IgnoreDisposeStream keeps the stream
+                _waveWriter = null;
                 wav = _wavStream.ToArray();
             }
             CleanupSessionLocked();
@@ -212,22 +212,22 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
     private void EnsureCapture()
     {
-        if (_capture is not null)
+        if (_audioCapture is not null)
         {
             return;
         }
 
-        _capture = new WasapiCapture();
-        _capture.DataAvailable += OnDataAvailable;
-        _capture.RecordingStopped += OnRecordingStopped;
+        _audioCapture = new WasapiCapture();
+        _audioCapture.DataAvailable += OnDataAvailable;
+        _audioCapture.RecordingStopped += OnRecordingStopped;
 
         if (_deviceEnumerator is null)
         {
             try
             {
                 _deviceEnumerator = new MMDeviceEnumerator();
-                _notificationClient = new DeviceNotificationClient(this);
-                _deviceEnumerator.RegisterEndpointNotificationCallback(_notificationClient);
+                _deviceNotificationClient = new DeviceNotificationClient(this);
+                _deviceEnumerator.RegisterEndpointNotificationCallback(_deviceNotificationClient);
             }
             catch (Exception ex)
             {
@@ -240,41 +240,44 @@ public sealed class RecorderService : IRecorderService, IDisposable
     {
         lock (_sync)
         {
-            if (!_recording || _buffered is null || _pipeline is null || _writer is null)
+            if (!_recording || _captureBuffer is null
+                || _resamplingPipeline is null || _waveWriter is null)
             {
                 return; // priming or already stopped - discard
             }
 
             try
             {
-                _buffered.AddSamples(e.Buffer, 0, e.BytesRecorded);
-                var peak = _lastLevel * 0.6f; // gentle decay between buffers
-                int read;
-                while ((read = _pipeline.Read(_drainBuffer, 0, _drainBuffer.Length)) > 0)
+                _captureBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded);
+                var peakLevel = _currentLevel * 0.6f; // gentle decay between buffers
+                int samplesRead;
+                while ((samplesRead = _resamplingPipeline.Read(
+                    _sampleBuffer, 0, _sampleBuffer.Length)) > 0)
                 {
-                    for (var i = 0; i < read; i++)
+                    for (var i = 0; i < samplesRead; i++)
                     {
-                        var abs = Math.Abs(_drainBuffer[i]);
-                        if (abs > peak)
+                        var absoluteLevel = Math.Abs(_sampleBuffer[i]);
+                        if (absoluteLevel > peakLevel)
                         {
-                            peak = abs;
+                            peakLevel = absoluteLevel;
                         }
                     }
-                    _writer.WriteSamples(_drainBuffer, 0, read);
+                    _waveWriter.WriteSamples(_sampleBuffer, 0, samplesRead);
 
-                    if (PcmChunkAvailable is { } tap)
+                    if (PcmChunkAvailable is { } pcmChunkHandler)
                     {
-                        var pcm = new byte[read * 2];
-                        for (var i = 0; i < read; i++)
+                        var pcmBytes = new byte[samplesRead * 2];
+                        for (var i = 0; i < samplesRead; i++)
                         {
-                            var sample = (short)Math.Clamp((int)(_drainBuffer[i] * 32767f), short.MinValue, short.MaxValue);
-                            pcm[i * 2] = (byte)sample;
-                            pcm[i * 2 + 1] = (byte)(sample >> 8);
+                            var sample = (short)Math.Clamp(
+                                (int)(_sampleBuffer[i] * 32767f), short.MinValue, short.MaxValue);
+                            pcmBytes[i * 2] = (byte)sample;
+                            pcmBytes[i * 2 + 1] = (byte)(sample >> 8);
                         }
-                        tap(pcm);
+                        pcmChunkHandler(pcmBytes);
                     }
                 }
-                _lastLevel = Math.Min(1f, peak);
+                _currentLevel = Math.Min(1f, peakLevel);
             }
             catch (Exception ex)
             {
@@ -300,8 +303,8 @@ public sealed class RecorderService : IRecorderService, IDisposable
             {
                 failedMidRecording = true;
                 _recording = false;
-                _maxTimer?.Dispose();
-                _maxTimer = null;
+                _maxDurationTimer?.Dispose();
+                _maxDurationTimer = null;
                 CleanupSessionLocked();
             }
             DisposeCaptureLocked(); // recreate on next use
@@ -329,13 +332,13 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
     private void CleanupSessionLocked()
     {
-        _writer?.Dispose();
-        _writer = null;
+        _waveWriter?.Dispose();
+        _waveWriter = null;
         _wavStream?.Dispose();
         _wavStream = null;
-        _pipeline = null;
-        _buffered = null;
-        _lastLevel = 0f;
+        _resamplingPipeline = null;
+        _captureBuffer = null;
+        _currentLevel = 0f;
     }
 
     private void DisposeCapture()
@@ -348,21 +351,21 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
     private void DisposeCaptureLocked()
     {
-        if (_capture is null)
+        if (_audioCapture is null)
         {
             return;
         }
         try
         {
-            _capture.DataAvailable -= OnDataAvailable;
-            _capture.RecordingStopped -= OnRecordingStopped;
-            _capture.Dispose();
+            _audioCapture.DataAvailable -= OnDataAvailable;
+            _audioCapture.RecordingStopped -= OnRecordingStopped;
+            _audioCapture.Dispose();
         }
         catch (Exception ex)
         {
             _log.Warn("Capture dispose failed.", ex);
         }
-        _capture = null;
+        _audioCapture = null;
     }
 
     public void Dispose()
@@ -376,11 +379,11 @@ public sealed class RecorderService : IRecorderService, IDisposable
         }
         lock (_sync)
         {
-            if (_deviceEnumerator is not null && _notificationClient is not null)
+            if (_deviceEnumerator is not null && _deviceNotificationClient is not null)
             {
                 try
                 {
-                    _deviceEnumerator.UnregisterEndpointNotificationCallback(_notificationClient);
+                    _deviceEnumerator.UnregisterEndpointNotificationCallback(_deviceNotificationClient);
                     _deviceEnumerator.Dispose();
                 }
                 catch
@@ -393,16 +396,16 @@ public sealed class RecorderService : IRecorderService, IDisposable
     }
 
     /// <summary>Averages N channels into mono (StereoToMonoSampleProvider only handles 2).</summary>
-    private sealed class AnyToMonoSampleProvider : ISampleProvider
+    private sealed class MultichannelToMonoSampleProvider : ISampleProvider
     {
         private readonly ISampleProvider _source;
-        private readonly int _channels;
+        private readonly int _channelCount;
         private float[] _sourceBuffer = [];
 
-        public AnyToMonoSampleProvider(ISampleProvider source)
+        public MultichannelToMonoSampleProvider(ISampleProvider source)
         {
             _source = source;
-            _channels = source.WaveFormat.Channels;
+            _channelCount = source.WaveFormat.Channels;
             WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(source.WaveFormat.SampleRate, 1);
         }
 
@@ -410,23 +413,23 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
         public int Read(float[] buffer, int offset, int count)
         {
-            var needed = count * _channels;
-            if (_sourceBuffer.Length < needed)
+            var requiredSampleCount = count * _channelCount;
+            if (_sourceBuffer.Length < requiredSampleCount)
             {
-                _sourceBuffer = new float[needed];
+                _sourceBuffer = new float[requiredSampleCount];
             }
-            var read = _source.Read(_sourceBuffer, 0, needed);
-            var frames = read / _channels;
-            for (var f = 0; f < frames; f++)
+            var samplesRead = _source.Read(_sourceBuffer, 0, requiredSampleCount);
+            var frameCount = samplesRead / _channelCount;
+            for (var frameIndex = 0; frameIndex < frameCount; frameIndex++)
             {
                 var sum = 0f;
-                for (var c = 0; c < _channels; c++)
+                for (var channelIndex = 0; channelIndex < _channelCount; channelIndex++)
                 {
-                    sum += _sourceBuffer[f * _channels + c];
+                    sum += _sourceBuffer[frameIndex * _channelCount + channelIndex];
                 }
-                buffer[offset + f] = sum / _channels;
+                buffer[offset + frameIndex] = sum / _channelCount;
             }
-            return frames;
+            return frameCount;
         }
     }
 
