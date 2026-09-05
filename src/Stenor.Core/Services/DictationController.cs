@@ -21,7 +21,8 @@ namespace Stenor.Services;
 /// </summary>
 public sealed class DictationController
 {
-    private static readonly TimeSpan MinHoldDuration = TimeSpan.FromMilliseconds(150);
+    /// <summary>Hold-mode presses shorter than this are accidental taps and are discarded.</summary>
+    public static readonly TimeSpan MinHoldDuration = TimeSpan.FromMilliseconds(150);
     private const int WavHeaderBytes = 44;
     private const int MinimumAudioDurationMs = 250;
     private const int MinimumWavBytes = WavHeaderBytes
@@ -76,6 +77,15 @@ public sealed class DictationController
 
     /// <summary>Raised when recording has actually started (recorder running, overlay shown).</summary>
     public event Action? DictationStarted;
+
+    /// <summary>Raised when the recording has been accepted and handed to Gemini (batch or
+    /// live drain); the paste follows unless <see cref="DictationFailed"/> fires.</summary>
+    public event Action? TranscriptionStarted;
+
+    /// <summary>Raised with the user-facing message whenever a dictation ends in an error
+    /// shown on the overlay (no speech, rejected key, microphone gone, ...). Lets the setup
+    /// wizard report the reason next to its checklist. Raised before <see cref="DictationCompleted"/>.</summary>
+    public event Action<string>? DictationFailed;
 
     /// <summary>Raised when a dictation cycle has fully finished (success, failure, or
     /// cancellation) and the machine is back in Idle. Not raised for batch tap discards or
@@ -179,7 +189,7 @@ public sealed class DictationController
             return;
         }
         var hadLiveCycle = AbandonLiveCycle();
-        _overlay.ShowError(message);
+        ReportError(message);
         _trayNotifier.ShowError("Stenor", message);
         if (hadLiveCycle)
         {
@@ -199,7 +209,7 @@ public sealed class DictationController
         if (_settings.GetApiKey() is null)
         {
             SetState(State.Idle);
-            _overlay.ShowError("Add your Gemini API key in Settings.");
+            ReportError("Add your Gemini API key in Settings.");
             _trayNotifier.ShowError(
                 "Stenor", "No API key configured. Open Settings from the tray icon.");
             return;
@@ -227,7 +237,7 @@ public sealed class DictationController
             SetState(State.Idle);
             AbandonLiveCycle();
             _log.Error("Recording could not be started.", ex);
-            _overlay.ShowError("Microphone unavailable.");
+            ReportError("Microphone unavailable.");
             _trayNotifier.ShowError(
                 "Stenor", "Could not start recording - check your microphone.");
         }
@@ -276,13 +286,13 @@ public sealed class DictationController
         catch (TranscriptionService.TranscriptionException ex)
         {
             _log.Error("Transcription failed.", ex);
-            _overlay.ShowError(ex.Message);
+            ReportError(ex.Message);
             _trayNotifier.ShowError("Stenor", ex.Message);
         }
         catch (Exception ex)
         {
             _log.Error("Dictation pipeline failed.", ex);
-            _overlay.ShowError("Something went wrong - see the log.");
+            ReportError("Something went wrong - see the log.");
             _trayNotifier.ShowError(
                 "Stenor", "Dictation failed unexpectedly. Details were logged.");
         }
@@ -309,11 +319,12 @@ public sealed class DictationController
         {
             _log.Info($"Recording contains no speech; skipping transcription ({speech}).");
             SetState(State.Idle);
-            _overlay.ShowError("No speech detected.");
+            ReportError("No speech detected.");
             return;
         }
 
         _overlay.ShowTranscribing();
+        RaiseSafely(TranscriptionStarted, nameof(TranscriptionStarted));
         _log.Info($"Transcribing {wav.Length / 1024} KB of audio.");
 
         CancellationToken token;
@@ -341,7 +352,7 @@ public sealed class DictationController
         if (string.IsNullOrWhiteSpace(text))
         {
             SetState(State.Idle);
-            _overlay.ShowError("No speech detected.");
+            ReportError("No speech detected.");
             return;
         }
 
@@ -361,6 +372,7 @@ public sealed class DictationController
     {
         cycle.Pcm.Writer.TryComplete(); // send pump finishes the tail, then signals AudioStreamEnd
         _overlay.ShowTranscribing();
+        RaiseSafely(TranscriptionStarted, nameof(TranscriptionStarted));
         lock (_stateLock)
         {
             _transcriptionCancellation?.Dispose();
@@ -411,7 +423,7 @@ public sealed class DictationController
             if (cycle.Failed)
             {
                 const string message = "Live typing lost the connection - the text typed so far was kept.";
-                _overlay.ShowError(message);
+                ReportError(message);
                 _trayNotifier.ShowError("Stenor", message);
             }
             else
@@ -519,7 +531,7 @@ public sealed class DictationController
         AbandonLiveCycle(); // detach the tap first so a rapid re-press cannot double-subscribe
         _recorderService.Cancel();
         const string message = "Live typing lost the connection - the text typed so far was kept.";
-        _overlay.ShowError(message);
+        ReportError(message);
         _trayNotifier.ShowError("Stenor", message);
         RaiseSafely(DictationCompleted, nameof(DictationCompleted));
     }
@@ -582,6 +594,20 @@ public sealed class DictationController
             }
         }
         cycle.Cts.Dispose();
+    }
+
+    /// <summary>Shows the error on the overlay and notifies <see cref="DictationFailed"/> listeners.</summary>
+    private void ReportError(string message)
+    {
+        _overlay.ShowError(message);
+        try
+        {
+            DictationFailed?.Invoke(message);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"{nameof(DictationFailed)} handler failed.", ex);
+        }
     }
 
     private void RaiseSafely(Action? handler, string name)

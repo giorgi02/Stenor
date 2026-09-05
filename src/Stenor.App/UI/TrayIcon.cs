@@ -22,6 +22,7 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
     private MenuItem? _checkForUpdatesItem;
 
     public event Action? SettingsRequested;
+    public event Action? SetupRequested;
     public event Action? QuitRequested;
     public event Action<ActivationMode>? ModeChangeRequested;
     public event Action? CheckForUpdatesRequested;
@@ -59,6 +60,14 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
         };
         settingsItem.Click += (_, _) => SettingsRequested?.Invoke();
         menu.Items.Add(settingsItem);
+
+        var setupItem = new MenuItem
+        {
+            Header = "Set up & test…",
+            Icon = CreateMenuGlyph("\uE9D9"), // Diagnostic
+        };
+        setupItem.Click += (_, _) => SetupRequested?.Invoke();
+        menu.Items.Add(setupItem);
         menu.Items.Add(new Separator());
 
         _holdItem = new MenuItem { Header = "Activation: Hold (push-to-talk)", IsCheckable = true };

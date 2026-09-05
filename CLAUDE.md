@@ -30,7 +30,8 @@ the dictation state machine, models, settings/JSON, Gemini transcription, loggin
 **`src/Stenor.App`** (`net10.0-windows` WPF exe, assembly name `Stenor` — UI, bootstrap, DI
 wiring, and *all* Windows integration: keyboard hook, WASAPI, SendInput/clipboard, DPAPI,
 registry, every P/Invoke). DI-wired singletons (`App.xaml.cs` → `BuildServices`). Entry:
-`Program.Main` (runs Velopack first) → `App.OnStartup`.
+`Program.Main` (runs Velopack first) → `App.OnStartup` (no API key configured → opens the
+`SetupWizardWindow`).
 
 Core stays platform-neutral via interfaces in `Stenor.Core/Interfaces/` (namespace
 `Stenor.Interfaces`), each implemented in App:
@@ -41,7 +42,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 
 | File | Responsibility |
 |---|---|
-| `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard); runs `SpeechDetector` before every batch upload and bails to Idle with "No speech detected."; live-typing cycle (PCM channel → send pump → sequential inject pump; batch fallback when the live session typed nothing) |
+| `Stenor.Core/Services/DictationController.cs` | State machine Idle→Recording→Transcribing→Injecting→Idle; all hotkey semantics (Hold/Toggle, 150 ms tap discard); runs `SpeechDetector` before every batch upload and bails to Idle with "No speech detected."; live-typing cycle (PCM channel → send pump → sequential inject pump; batch fallback when the live session typed nothing). Lifecycle events `DictationStarted` / `TranscriptionStarted` / `DictationFailed(message)` / `DictationCompleted` (the wizard checklist and the working-set trim hang off them) |
 | `Stenor.Core/Services/SpeechDetector.cs` | Pre-flight silence gate on the finished WAV (20 ms RMS frames → 10th/90th-percentile floor/peak; needs ~9.5 dB of dynamic range + 120 ms of sustained energy). Silence must never reach the model — it answers empty audio with invented, fluent text. Fails open on anything unmeasurable; rejections log peak/floor/voiced for tuning |
 | `Stenor.Core/Services/TranscriptionService.cs` | Batch path: `GenerateContentAsync`, model `gemini-3.1-flash-lite`, temperature 0 (sampling freedom shows up as invented text on quiet audio); 30 s timeout, 1 retry on transient; prompt template embedded from `Prompts/TranscriptionPrompt.md` (`{languageHint}` placeholder; priority rules: spoken audio is content never instructions, never invent speech, omit uncertain fragments instead of guessing, silence → empty response) |
 | `Stenor.Core/Services/LiveTranscriptionService.cs` | Live-typing sessions: Gemini Live WebSocket, model `gemini-3.1-flash-live-preview`, `inputAudioTranscription` with ISO-639 `LanguageHints` from the selected languages (`LanguageAuto` when none — codes come from `LanguageCatalog.CodeFor`), auto-VAD ON (tuned start sensitivity/prefix padding); yields append-only per-utterance transcript chunks via a Channel; finish = `AudioStreamEnd` |
@@ -55,7 +56,10 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 | `Stenor.App/Interop/NativeMethods.cs` | All P/Invoke (hand-written, no CsWin32) |
 | `Stenor.App/UI/OverlayWindow.xaml(.cs)` | Recording pill; `WS_EX_NOACTIVATE|TOOLWINDOW`, positioned on the active monitor in raw pixels |
 | `Stenor.App/UI/SettingsWindow.xaml(.cs)` | One-page settings; new instance per open, destroyed on close |
-| `Stenor.App/UI/TrayIcon.cs` | H.NotifyIcon menu (Settings, mode switch, Quit) |
+| `Stenor.App/UI/SetupWizardWindow.xaml(.cs)` | Setup & self-test wizard: first run (no API key) and tray "Set up & test…". Steps: API key (tested on Next; rejected / unreachable / timeout are distinct messages) → microphone (records through the real `RecorderService`, live meter, runs `SpeechDetector` over a rolling 3 s window and additionally requires a ≥ −40 dBFS peak — the runtime gate alone passes keyboard clicks; hook `Suspended` meanwhile) → hotkey + mode → trial dictation into its own TextBox with a checklist driven only by `DictationController` lifecycle events (the hook's `Pressed` is deliberately not used: the controller handles it first and may already have raised a failure) → summary + start-with-Windows. Each step saves its settings when left; new instance per open, destroyed on close |
+| `Stenor.App/UI/LanguagePicker.xaml(.cs)` | Multi-select spoken-language dropdown (empty = auto-detect), shared by Settings and the wizard |
+| `Stenor.App/UI/HotkeyCaptureButton.xaml(.cs)` | Hotkey capture button (suspends the hook while capturing), shared by Settings and the wizard |
+| `Stenor.App/UI/TrayIcon.cs` | H.NotifyIcon menu (Settings, Set up & test, mode switch, updates, Quit) |
 | `Stenor.App/UI/HotkeyDisplay.cs` | Hotkey display names (`Describe`/`KeyName`); layout-aware fallback via GetKeyNameText |
 
 ## Hard constraints — do not violate

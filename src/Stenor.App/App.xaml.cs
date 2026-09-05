@@ -24,6 +24,7 @@ public partial class App : Application
     private ServiceProvider? _services;
     private Logger? _log;
     private SettingsWindow? _settingsWindow;
+    private SetupWizardWindow? _setupWizard;
     private CancellationTokenSource? _trimCts;
     private UpdateManager? _updateManager;
     private VelopackAsset? _pendingUpdate;
@@ -68,6 +69,7 @@ public partial class App : Application
         var tray = _services.GetRequiredService<TrayIcon>();
         tray.Initialize(settings.Current.ActivationMode);
         tray.SettingsRequested += OpenSettings;
+        tray.SetupRequested += OpenSetupWizard;
         tray.QuitRequested += Shutdown;
         tray.CheckForUpdatesRequested += () => _ = CheckForUpdatesAsync(userInitiated: true);
         tray.RestartToUpdateRequested += RestartToApplyUpdate;
@@ -103,7 +105,7 @@ public partial class App : Application
 
         if (settings.GetApiKey() is null)
         {
-            OpenSettings();
+            OpenSetupWizard(); // first run: guided setup + self-test instead of bare Settings
         }
 
         _ = CheckForUpdatesAsync(userInitiated: false);
@@ -182,6 +184,7 @@ public partial class App : Application
         services.AddSingleton<ITrayNotifier>(sp => sp.GetRequiredService<TrayIcon>());
         services.AddSingleton<DictationController>();
         services.AddTransient<SettingsWindow>();
+        services.AddTransient<SetupWizardWindow>();
         return services.BuildServiceProvider();
     }
 
@@ -206,6 +209,30 @@ public partial class App : Application
             };
             _settingsWindow.Show();
             _settingsWindow.Activate();
+        });
+    }
+
+    private void OpenSetupWizard()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_setupWizard is not null)
+            {
+                _setupWizard.Activate();
+                return;
+            }
+            if (_services is null)
+            {
+                return;
+            }
+            _setupWizard = _services.GetRequiredService<SetupWizardWindow>();
+            _setupWizard.Closed += (_, _) =>
+            {
+                _setupWizard = null; // destroyed, not hidden
+                ScheduleTrim(TimeSpan.FromSeconds(1));
+            };
+            _setupWizard.Show();
+            _setupWizard.Activate();
         });
     }
 

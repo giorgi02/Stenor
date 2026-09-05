@@ -1,0 +1,6 @@
+<UserControl x:Class="Stenor.UI.HotkeyCaptureButton"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Button x:Name="CaptureButton" Style="{StaticResource DarkButton}"
+            HorizontalContentAlignment="Left" Click="OnClick" />
+</UserControl>

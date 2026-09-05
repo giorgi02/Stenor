@@ -45,8 +45,20 @@ untouched by the uninstall.
 
 ## First run
 
-On the first launch the settings window opens by itself — paste in a Gemini API key from
-<https://aistudio.google.com/apikey>, optionally click **Test key**, and save.
+On the first launch a short setup wizard opens and checks each link of the chain, so if
+something does not work you can see exactly where:
+
+1. **Gemini API key** — paste a key from <https://aistudio.google.com/apikey>; *Test & continue*
+   verifies it and tells a rejected key apart from a network problem.
+2. **Microphone** — shows the default input device and a live level meter; say a sentence and
+   the wizard confirms that speech is actually detected at a usable level.
+3. **Hotkey** — pick the key (Right Ctrl by default) and the Hold / Toggle mode.
+4. **Try it out** — dictate into a box inside the wizard itself; a checklist ticks off hotkey,
+   recording, transcription and insertion as they happen, and names the step that failed.
+5. **Summary** — what passed, plus the *Start with Windows* option.
+
+Every step can be skipped. The wizard can be run again at any time from the tray menu
+(*Set up & test…*) — useful when something stops working later.
 
 After that:
 

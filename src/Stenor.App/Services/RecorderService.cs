@@ -57,6 +57,28 @@ public sealed class RecorderService : IRecorderService, IDisposable
     /// <summary>Latest peak level (0..1) of the mono 16 kHz stream; polled by the overlay.</summary>
     public float CurrentLevel => _currentLevel;
 
+    /// <summary>Whether a recording is in progress. The setup wizard checks this before its
+    /// microphone test: <see cref="Start"/> silently no-ops on a busy recorder and the test's
+    /// <see cref="Cancel"/> would then discard the user's dictation.</summary>
+    public bool IsRecording => _recording;
+
+    /// <summary>Friendly name of the current default capture device, or null when there is
+    /// none (shown by the setup wizard so a wrong default mic is obvious).</summary>
+    public string? TryGetDefaultDeviceName()
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+            return device.FriendlyName;
+        }
+        catch (Exception ex)
+        {
+            _log.Warn("Default capture device lookup failed.", ex);
+            return null;
+        }
+    }
+
     /// <summary>Initializes the capture device and runs one throwaway start/stop cycle.
     /// Call from a background thread (never the UI thread) at app start.</summary>
     public void Prime()

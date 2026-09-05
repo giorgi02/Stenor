@@ -102,16 +102,26 @@ public sealed class TranscriptionService
         }
         catch (ClientError)
         {
-            return (false, "Key was rejected by Gemini.");
+            return (false, "Key was rejected by Gemini. Check that it was copied completely.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return (false, "Cancelled.");
         }
+        catch (OperationCanceledException ex)
+        {
+            _log.Warn("Test key call timed out.", ex);
+            return (false, "Gemini did not answer within 15 s. Check your internet connection, VPN or firewall.");
+        }
+        catch (HttpRequestException ex)
+        {
+            _log.Warn("Test key call could not connect.", ex);
+            return (false, "Could not connect to Gemini. Check your internet connection, VPN or firewall.");
+        }
         catch (Exception ex)
         {
             _log.Warn("Test key call failed.", ex);
-            return (false, "Could not reach Gemini (network error or timeout).");
+            return (false, "Could not reach Gemini (network error).");
         }
     }
 
