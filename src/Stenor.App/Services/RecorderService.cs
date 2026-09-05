@@ -1,47 +1,52 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
+using NAudio.Wave;
 using Stenor.Constants;
 using Stenor.Interfaces;
-using NAudio.CoreAudioApi.Interfaces;
-using NAudio.Utils;
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
 
 namespace Stenor.Services;
 
 /// <summary>
 /// WASAPI microphone capture producing an in-memory 16 kHz / 16-bit / mono WAV.
 ///
-/// Warm-start strategy: a single WasapiCapture instance is created and primed (one brief
-/// start/stop cycle) at app launch, which forces device/driver initialization and JITs the
-/// audio path. The instance is then kept and restarted per recording, so the hotkey-to-first-
-/// sample latency stays well under 50 ms while the mic-in-use indicator remains off when idle.
+/// The capture stream is opened directly in the target format: shared-mode WASAPI inserts its
+/// own channel matrixer and sample-rate converter (AutoConvertPcm + SrcDefaultQuality), so every
+/// packet that arrives is already raw 16 kHz mono PCM16 and no managed conversion runs.
 ///
-/// The device is captured at its native shared-mode format and converted on the fly
-/// (downmix to mono, WDL resample to 16 kHz) so only the small output WAV is buffered.
+/// Warm-start strategy: a <see cref="WasapiRecorder"/> is single-use (its audio client can only
+/// be initialized once), so one is always built ahead of time - at app launch, after a priming
+/// start/stop cycle that forces device/driver initialization and JITs the audio path, and again
+/// after every recording - and only started when the hotkey fires. Building is a cheap device
+/// activation; the mic-in-use indicator stays off until the recorder actually starts.
 /// </summary>
 public sealed class RecorderService : IRecorderService, IDisposable
 {
     public static readonly TimeSpan MaxRecordingDuration = TimeSpan.FromMinutes(5);
 
+    private static readonly WaveFormat CaptureFormat =
+        new(PcmFormat.SampleRateHz, PcmFormat.BitsPerSample, PcmFormat.ChannelCount);
+
+    /// <summary>WASAPI hands over 5-10 ms packets; the live tap coalesces them into 50 ms chunks
+    /// so each chunk is one WebSocket message rather than a hundred-plus per second.</summary>
+    private const int PcmChunkBytes = PcmFormat.BytesPerSecond / 20;
+
     private readonly Logger _log;
     private readonly object _sync = new();
     private readonly ManualResetEventSlim _stopCompleted = new(false);
 
-    private WasapiCapture? _audioCapture;
+    private WasapiRecorder? _recorder; // armed (built, not started) or currently recording
     private MMDeviceEnumerator? _deviceEnumerator;
-    private DeviceNotificationClient? _deviceNotificationClient;
-    private volatile bool _defaultDeviceChanged;
+    private MMDeviceNotificationClient? _deviceNotifications;
 
     // Per-recording session (guarded by _sync).
-    private BufferedWaveProvider? _captureBuffer;
-    private ISampleProvider? _resamplingPipeline;
     private MemoryStream? _wavStream;
     private WaveFileWriter? _waveWriter;
     private System.Threading.Timer? _maxDurationTimer;
     private volatile bool _recording;
     private volatile float _currentLevel;
-    private readonly float[] _sampleBuffer = new float[8192];
+    private readonly byte[] _pcmChunk = new byte[PcmChunkBytes];
+    private int _pcmChunkFill;
 
     public event Action? MaxDurationReached;
     public event Action<string>? Failed;
@@ -58,28 +63,37 @@ public sealed class RecorderService : IRecorderService, IDisposable
     {
         try
         {
+            WasapiRecorder recorder;
             lock (_sync)
             {
-                EnsureCapture();
+                recorder = EnsureRecorder();
             }
             _stopCompleted.Reset();
-            _audioCapture!.StartRecording();
+            recorder.StartRecording();
             Thread.Sleep(150);
-            _audioCapture.StopRecording();
-            _stopCompleted.Wait(TimeSpan.FromSeconds(1));
+            StopAndWait(recorder, TimeSpan.FromSeconds(1));
+            lock (_sync)
+            {
+                RetireRecorderLocked();
+                EnsureRecorder(); // arm a fresh one for the first real recording
+            }
             _log.Info("Audio capture primed.");
         }
         catch (Exception ex)
         {
             // No microphone yet is not fatal; a real failure surfaces on first recording.
             _log.Warn("Audio capture priming failed.", ex);
-            DisposeCapture();
+            lock (_sync)
+            {
+                RetireRecorderLocked();
+            }
         }
     }
 
     /// <summary>Begins recording. Throws when the capture device cannot be started.</summary>
     public void Start()
     {
+        WasapiRecorder recorder;
         lock (_sync)
         {
             if (_recording)
@@ -87,15 +101,9 @@ public sealed class RecorderService : IRecorderService, IDisposable
                 return;
             }
 
-            if (_defaultDeviceChanged)
-            {
-                _defaultDeviceChanged = false;
-                DisposeCaptureLocked();
-            }
-
             try
             {
-                EnsureCapture();
+                recorder = EnsureRecorder();
             }
             catch (Exception ex)
             {
@@ -103,25 +111,8 @@ public sealed class RecorderService : IRecorderService, IDisposable
                 throw new InvalidOperationException("No microphone available.", ex);
             }
 
-            var sourceFormat = _audioCapture!.WaveFormat;
-            _captureBuffer = new BufferedWaveProvider(sourceFormat)
-            {
-                ReadFully = false, // never pad with silence; Read returns only real samples
-                DiscardOnBufferOverflow = true,
-                BufferDuration = TimeSpan.FromSeconds(5),
-            };
-            ISampleProvider samples = _captureBuffer.ToSampleProvider();
-            if (sourceFormat.Channels > 1)
-            {
-                samples = sourceFormat.Channels == 2
-                    ? new StereoToMonoSampleProvider(samples) { LeftVolume = 0.5f, RightVolume = 0.5f }
-                    : new MultichannelToMonoSampleProvider(samples);
-            }
-            _resamplingPipeline = new WdlResamplingSampleProvider(samples, PcmFormat.SampleRateHz);
-
             _wavStream = new MemoryStream();
-            _waveWriter = new WaveFileWriter(new IgnoreDisposeStream(_wavStream),
-                new WaveFormat(PcmFormat.SampleRateHz, PcmFormat.BitsPerSample, PcmFormat.ChannelCount));
+            _waveWriter = new WaveFileWriter(_wavStream, CaptureFormat);
             _currentLevel = 0f;
             _stopCompleted.Reset();
             _recording = true;
@@ -129,17 +120,17 @@ public sealed class RecorderService : IRecorderService, IDisposable
 
         try
         {
-            _audioCapture!.StartRecording();
+            recorder.StartRecording();
         }
         catch (Exception ex)
         {
             _log.Error("Failed to start recording; retrying with a fresh device.", ex);
             lock (_sync)
             {
-                DisposeCaptureLocked();
+                RetireRecorderLocked();
                 try
                 {
-                    EnsureCapture();
+                    recorder = EnsureRecorder();
                 }
                 catch (Exception retryEx)
                 {
@@ -150,7 +141,7 @@ public sealed class RecorderService : IRecorderService, IDisposable
             }
             try
             {
-                _audioCapture!.StartRecording();
+                recorder.StartRecording();
             }
             catch (Exception retryEx)
             {
@@ -173,8 +164,9 @@ public sealed class RecorderService : IRecorderService, IDisposable
     /// <summary>Stops recording and discards the audio.</summary>
     public void Cancel() => StopRecording(discardAudio: true);
 
-    private byte[]? StopRecording(bool discardAudio)
+    private byte[]? StopRecording(bool discardAudio, bool rearm = true)
     {
+        WasapiRecorder? recorder;
         lock (_sync)
         {
             if (!_recording)
@@ -184,12 +176,15 @@ public sealed class RecorderService : IRecorderService, IDisposable
             _recording = false; // DataAvailable stops writing from here on
             _maxDurationTimer?.Dispose();
             _maxDurationTimer = null;
+            recorder = _recorder;
         }
 
         try
         {
-            _audioCapture?.StopRecording();
-            _stopCompleted.Wait(TimeSpan.FromMilliseconds(750));
+            if (recorder is not null)
+            {
+                StopAndWait(recorder, TimeSpan.FromMilliseconds(750));
+            }
         }
         catch (Exception ex)
         {
@@ -201,87 +196,121 @@ public sealed class RecorderService : IRecorderService, IDisposable
             byte[]? wav = null;
             if (!discardAudio && _waveWriter is not null && _wavStream is not null)
             {
-                _waveWriter.Dispose(); // finalizes the WAV header; IgnoreDisposeStream keeps the stream
+                _waveWriter.Dispose(); // finalizes the WAV header; the stream is caller-owned and stays open
                 _waveWriter = null;
                 wav = _wavStream.ToArray();
             }
+            if (!discardAudio)
+            {
+                FlushPcmChunkLocked(); // the tail reaches the tap before Stop returns
+            }
             CleanupSessionLocked();
+            RetireRecorderLocked(); // single-use: the next recording gets a fresh recorder
+            if (rearm)
+            {
+                try
+                {
+                    EnsureRecorder();
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn("Could not pre-arm the microphone; retried on the next recording.", ex);
+                }
+            }
             return wav;
         }
     }
 
-    private void EnsureCapture()
+    /// <summary>Requests a stop and waits (bounded) for the capture thread to wind down. A stop
+    /// requested while the recorder is still <see cref="CaptureState.Starting"/> is lost - the
+    /// capture thread overwrites the state once the device starts - so the request is held back
+    /// until capture has actually begun (or failed).</summary>
+    private void StopAndWait(WasapiRecorder recorder, TimeSpan timeout)
     {
-        if (_audioCapture is not null)
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        while (recorder.CaptureState == CaptureState.Starting && Environment.TickCount64 < deadline)
         {
-            return;
+            Thread.Sleep(5);
+        }
+        recorder.StopRecording();
+        _stopCompleted.Wait(TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64)));
+    }
+
+    /// <summary>Returns the armed recorder, building one on the current default device.</summary>
+    private WasapiRecorder EnsureRecorder()
+    {
+        if (_recorder is not null)
+        {
+            return _recorder;
         }
 
-        _audioCapture = new WasapiCapture();
-        _audioCapture.DataAvailable += OnDataAvailable;
-        _audioCapture.RecordingStopped += OnRecordingStopped;
+        var recorder = new WasapiRecorderBuilder().WithFormat(CaptureFormat).Build();
+        recorder.DataAvailable += OnDataAvailable;
+        recorder.RecordingStopped += OnRecordingStopped;
+        _recorder = recorder;
 
         if (_deviceEnumerator is null)
         {
             try
             {
                 _deviceEnumerator = new MMDeviceEnumerator();
-                _deviceNotificationClient = new DeviceNotificationClient(this);
-                _deviceEnumerator.RegisterEndpointNotificationCallback(_deviceNotificationClient);
+                // Raised on the audio service's callback thread; the handler only swaps a field
+                // and defers the dispose, as NAudio requires there.
+                _deviceNotifications = _deviceEnumerator.CreateNotificationClient(useSynchronizationContext: false);
+                _deviceNotifications.DefaultDeviceChanged += OnDefaultDeviceChanged;
             }
             catch (Exception ex)
             {
                 _log.Warn("Device-change notifications unavailable.", ex);
             }
         }
+        return recorder;
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    private void OnDataAvailable(
+        ReadOnlySpan<byte> buffer, AudioClientBufferFlags flags, long devicePosition, long qpcPosition)
     {
         lock (_sync)
         {
-            if (!_recording || _captureBuffer is null
-                || _resamplingPipeline is null || _waveWriter is null)
+            if (!_recording || _waveWriter is null)
             {
                 return; // priming or already stopped - discard
             }
 
             try
             {
-                _captureBuffer.AddSamples(e.Buffer, 0, e.BytesRecorded);
-                var peakLevel = _currentLevel * 0.6f; // gentle decay between buffers
-                int samplesRead;
-                while ((samplesRead = _resamplingPipeline.Read(
-                    _sampleBuffer, 0, _sampleBuffer.Length)) > 0)
-                {
-                    for (var i = 0; i < samplesRead; i++)
-                    {
-                        var absoluteLevel = Math.Abs(_sampleBuffer[i]);
-                        if (absoluteLevel > peakLevel)
-                        {
-                            peakLevel = absoluteLevel;
-                        }
-                    }
-                    _waveWriter.WriteSamples(_sampleBuffer, 0, samplesRead);
+                _waveWriter.Write(buffer);
 
-                    if (PcmChunkAvailable is { } pcmChunkHandler)
+                var peakLevel = _currentLevel * 0.6f; // gentle decay between packets
+                foreach (var sample in MemoryMarshal.Cast<byte, short>(buffer))
+                {
+                    var absoluteLevel = Math.Abs((int)sample) / 32768f;
+                    if (absoluteLevel > peakLevel)
                     {
-                        var pcmBytes = new byte[samplesRead * 2];
-                        for (var i = 0; i < samplesRead; i++)
-                        {
-                            var sample = (short)Math.Clamp(
-                                (int)(_sampleBuffer[i] * 32767f), short.MinValue, short.MaxValue);
-                            pcmBytes[i * 2] = (byte)sample;
-                            pcmBytes[i * 2 + 1] = (byte)(sample >> 8);
-                        }
-                        pcmChunkHandler(pcmBytes);
+                        peakLevel = absoluteLevel;
                     }
                 }
                 _currentLevel = Math.Min(1f, peakLevel);
+
+                if (PcmChunkAvailable is not null)
+                {
+                    var remaining = buffer;
+                    while (!remaining.IsEmpty)
+                    {
+                        var take = Math.Min(remaining.Length, PcmChunkBytes - _pcmChunkFill);
+                        remaining[..take].CopyTo(_pcmChunk.AsSpan(_pcmChunkFill));
+                        _pcmChunkFill += take;
+                        remaining = remaining[take..];
+                        if (_pcmChunkFill == PcmChunkBytes)
+                        {
+                            FlushPcmChunkLocked();
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                _log.Error("Audio conversion failed mid-recording.", ex);
+                _log.Error("Audio write failed mid-recording.", ex);
             }
         }
     }
@@ -307,7 +336,7 @@ public sealed class RecorderService : IRecorderService, IDisposable
                 _maxDurationTimer = null;
                 CleanupSessionLocked();
             }
-            DisposeCaptureLocked(); // recreate on next use
+            RetireRecorderLocked(); // rebuilt on next use
         }
 
         if (failedMidRecording)
@@ -316,18 +345,31 @@ public sealed class RecorderService : IRecorderService, IDisposable
         }
     }
 
-    private void OnDefaultDeviceChanged()
+    private void OnDefaultDeviceChanged(object? sender, DefaultDeviceChangedEventArgs e)
     {
-        _defaultDeviceChanged = true;
+        if (e.Flow != DataFlow.Capture || e.Role != Role.Console)
+        {
+            return;
+        }
         lock (_sync)
         {
+            // Armed on the old device: drop it so the next Start builds on the new default. A
+            // recording in progress keeps its stream; the post-stop re-arm picks up the change.
             if (!_recording)
             {
-                DisposeCaptureLocked();
-                _defaultDeviceChanged = false;
+                RetireRecorderLocked();
             }
         }
         _log.Info("Default capture device changed.");
+    }
+
+    private void FlushPcmChunkLocked()
+    {
+        if (_pcmChunkFill > 0 && PcmChunkAvailable is { } pcmChunkHandler)
+        {
+            pcmChunkHandler(_pcmChunk[.._pcmChunkFill]);
+        }
+        _pcmChunkFill = 0;
     }
 
     private void CleanupSessionLocked()
@@ -336,127 +378,57 @@ public sealed class RecorderService : IRecorderService, IDisposable
         _waveWriter = null;
         _wavStream?.Dispose();
         _wavStream = null;
-        _resamplingPipeline = null;
-        _captureBuffer = null;
         _currentLevel = 0f;
+        _pcmChunkFill = 0;
     }
 
-    private void DisposeCapture()
+    /// <summary>Detaches the current recorder and disposes it off-thread: Dispose joins the
+    /// capture thread, which must neither block a hotkey handler on a wedged driver nor run on
+    /// the capture thread itself (RecordingStopped is raised there).</summary>
+    private void RetireRecorderLocked()
     {
-        lock (_sync)
-        {
-            DisposeCaptureLocked();
-        }
-    }
-
-    private void DisposeCaptureLocked()
-    {
-        if (_audioCapture is null)
+        var recorder = _recorder;
+        if (recorder is null)
         {
             return;
         }
-        try
+        _recorder = null;
+        recorder.DataAvailable -= OnDataAvailable;
+        recorder.RecordingStopped -= OnRecordingStopped;
+        Task.Run(() =>
         {
-            _audioCapture.DataAvailable -= OnDataAvailable;
-            _audioCapture.RecordingStopped -= OnRecordingStopped;
-            _audioCapture.Dispose();
-        }
-        catch (Exception ex)
-        {
-            _log.Warn("Capture dispose failed.", ex);
-        }
-        _audioCapture = null;
+            try
+            {
+                recorder.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("Capture dispose failed.", ex);
+            }
+        });
     }
 
     public void Dispose()
     {
         try
         {
-            Cancel();
+            StopRecording(discardAudio: true, rearm: false);
         }
         catch
         {
         }
         lock (_sync)
         {
-            if (_deviceEnumerator is not null && _deviceNotificationClient is not null)
+            try
             {
-                try
-                {
-                    _deviceEnumerator.UnregisterEndpointNotificationCallback(_deviceNotificationClient);
-                    _deviceEnumerator.Dispose();
-                }
-                catch
-                {
-                }
+                _deviceNotifications?.Dispose();
+                _deviceEnumerator?.Dispose();
             }
-            DisposeCaptureLocked();
+            catch
+            {
+            }
+            RetireRecorderLocked();
         }
         _stopCompleted.Dispose();
-    }
-
-    /// <summary>Averages N channels into mono (StereoToMonoSampleProvider only handles 2).</summary>
-    private sealed class MultichannelToMonoSampleProvider : ISampleProvider
-    {
-        private readonly ISampleProvider _source;
-        private readonly int _channelCount;
-        private float[] _sourceBuffer = [];
-
-        public MultichannelToMonoSampleProvider(ISampleProvider source)
-        {
-            _source = source;
-            _channelCount = source.WaveFormat.Channels;
-            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(source.WaveFormat.SampleRate, 1);
-        }
-
-        public WaveFormat WaveFormat { get; }
-
-        public int Read(float[] buffer, int offset, int count)
-        {
-            var requiredSampleCount = count * _channelCount;
-            if (_sourceBuffer.Length < requiredSampleCount)
-            {
-                _sourceBuffer = new float[requiredSampleCount];
-            }
-            var samplesRead = _source.Read(_sourceBuffer, 0, requiredSampleCount);
-            var frameCount = samplesRead / _channelCount;
-            for (var frameIndex = 0; frameIndex < frameCount; frameIndex++)
-            {
-                var sum = 0f;
-                for (var channelIndex = 0; channelIndex < _channelCount; channelIndex++)
-                {
-                    sum += _sourceBuffer[frameIndex * _channelCount + channelIndex];
-                }
-                buffer[offset + frameIndex] = sum / _channelCount;
-            }
-            return frameCount;
-        }
-    }
-
-    private sealed class DeviceNotificationClient(RecorderService owner) : IMMNotificationClient
-    {
-        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
-        {
-            if (flow == DataFlow.Capture && role == Role.Console)
-            {
-                owner.OnDefaultDeviceChanged();
-            }
-        }
-
-        public void OnDeviceStateChanged(string deviceId, DeviceState newState)
-        {
-        }
-
-        public void OnDeviceAdded(string pwstrDeviceId)
-        {
-        }
-
-        public void OnDeviceRemoved(string deviceId)
-        {
-        }
-
-        public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key)
-        {
-        }
     }
 }

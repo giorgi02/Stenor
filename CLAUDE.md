@@ -48,7 +48,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
 | `Stenor.Core/Services/GeminiClientProvider.cs` | Single cached Google.GenAI `Client` keyed on the API key (invalidated on settings change); shared by batch + live. Replaced/invalidated clients are dropped, never disposed — disposing aborts in-flight requests. Also owns `Ipv4FirstClientOptions`: a custom HttpClient (`SocketsHttpHandler.ConnectCallback`) that dials the last-known-good address family first (IPv4 initially; 5 s per attempt, families interleaved, success updates the sticky preference), making all Gemini REST calls immune to either family breaking mid-session — every REST `Client` (incl. the key-test throwaway) must be built with it |
 | `Stenor.Core/Services/SettingsStore.cs` | `%APPDATA%\Stenor\settings.json`; API key encrypted via `ISecretProtector` (DPAPI impl in App) |
 | `Stenor.App/Services/HotkeyService.cs` | `WH_KEYBOARD_LL` hook on a dedicated pump thread; raises `Pressed`/`Released(duration)` |
-| `Stenor.App/Services/RecorderService.cs` | Warm-primed WasapiCapture → 16 kHz/16-bit/mono WAV in memory; 5-min cap; device-change recovery; `PcmChunkAvailable` raw-PCM tap (capture thread, only converted while a handler is attached) |
+| `Stenor.App/Services/RecorderService.cs` | NAudio 3 `WasapiRecorder` opened directly at 16 kHz/16-bit/mono — shared-mode WASAPI (AutoConvertPcm + SrcDefaultQuality) does the downmix/resample, no managed pipeline — → WAV in memory; a recorder is **single-use** (`IAudioClient::Initialize` can't be repeated), so one is always pre-armed: built at launch after a priming start/stop cycle and rebuilt after every stop (measured: Start ≈5 ms, first packet ≈10 ms); retired recorders are disposed off-thread because `Dispose` joins the capture thread (and `RecordingStopped` is raised on it); a `StopRecording()` issued while the recorder is still `Starting` is silently lost (the capture thread overwrites the state), so `StopAndWait` waits for `Capturing` first; 5-min cap; default-device change via `MMDeviceNotificationClient` (no sync context, handler only drops the armed recorder); `PcmChunkAvailable` raw-PCM tap coalesced to 50 ms chunks (tail flushed inside `Stop()`) |
 | `Stenor.App/Services/InjectionService.cs` | Clipboard backup → SendInput Ctrl+V → restore; Unicode-typing fallback |
 | `Stenor.App/Services/UninstallSizeUpdater.cs` | Rewrites uninstall-entry `EstimatedSize` as REG_DWORD at startup (Velopack writes REG_QWORD → blank Control Panel "Size") |
 | `Stenor.App/Services/NetworkGuard.cs` | Startup probe for networks that advertise but blackhole IPv6 (.NET walks every AAAA at ~21 s each — every Gemini call times out; no Happy Eyeballs): TCP-443 probes the Gemini host over v6+v4 in raw Winsock, sets process-wide `System.Net.DisableIPv6` whenever IPv4 works (not only when IPv6 fails the probe — IPv6 can pass at startup and blackhole mid-session, and the latched switch can't be flipped later). Only the Live WebSocket + Velopack updater depend on it; Gemini REST self-heals per connection via `GeminiClientProvider`. Must run in `Program.Main` before any managed socket is created — the runtime latches that switch on first socket use (also why the probe can't use `System.Net.Sockets`; managed `Dns` is safe, verified) |
@@ -81,7 +81,7 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
    blocking GC never fires mid-recording) to hold the <70 MB idle RAM target (measured ~6 MB
    WS idle). Cold start target ≈ 1.2 s.
 
-## Gemini API notes (verified against the SDK, v1.16.0)
+## Gemini API notes (verified against the SDK, v1.21.0)
 
 - `new Client(apiKey: key)`; `client.Models.GenerateContentAsync(model, content, config, ct)`.
 - Inline audio: `new Part { InlineData = new Blob { MimeType = "audio/wav", Data = bytes } }`.
@@ -98,15 +98,19 @@ Keep it that way: new Windows/UI dependencies go in App behind a Core interface.
   on and finish with `AudioStreamEnd = true`. `TurnComplete` fires after *every* utterance —
   only treat it as "transcript done" once finishing. Model replies (`ModelTurn` audio) are
   discarded; enum members are PascalCase (`Modality.Audio`).
-- Live transcription config, verified against the real API (2026-07): the consumer API accepts
-  `AudioTranscriptionConfig.LanguageHints` (bare `ka` and region `ka-GE` forms both work) and
-  `LanguageAuto`; hints are ASR-level and reproducibly fix Georgian misrecognition at utterance
-  starts (the system-instruction hint alone is not enough). Dead ends checked so far — don't
-  re-explore without new evidence: `InterimInputTranscription` is never sent for this model
-  (and no enabling flag exists); `SilenceDurationMs`/`EndOfSpeechSensitivity` produce no
-  observable change (default VAD already commits utterances at ≤700 ms pauses);
-  `gemini-2.5-flash-native-audio-*` DOES stream input transcription word-by-word (append-only
-  deltas) but cannot transcribe Georgian at all, so it's unusable here.
+- Live transcription config, verified against the real API (2026-07, re-verified 2026-09): the
+  consumer API accepts top-level `AudioTranscriptionConfig.LanguageCodes` (bare `ka` and region
+  `ka-GE` forms both work; leaving it unset is auto-detection). `LanguageHints`/`LanguageAuto`
+  are deprecated in the SDK and slated for removal — don't reintroduce them. Hints are ASR-level
+  and reproducibly fix Georgian misrecognition at utterance starts (the system-instruction hint
+  alone is not enough). Dead ends checked so far — don't re-explore without new evidence:
+  `AudioTranscriptionConfig.Mode = Smart` (SDK ≥ 1.21, promises filler removal) is accepted by
+  the live model but yields a transcript identical to verbatim (2026-09, English TTS with
+  fillers); `InterimInputTranscription` is never sent for this model (and no enabling flag
+  exists); `SilenceDurationMs`/`EndOfSpeechSensitivity` produce no observable change (default
+  VAD already commits utterances at ≤700 ms pauses); `gemini-2.5-flash-native-audio-*` DOES
+  stream input transcription word-by-word (append-only deltas) but cannot transcribe Georgian at
+  all, so it's unusable here.
 
 ## Documentation language
 

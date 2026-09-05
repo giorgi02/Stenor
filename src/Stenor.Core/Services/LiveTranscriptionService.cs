@@ -82,18 +82,17 @@ public sealed class LiveTranscriptionService
     }
 
     /// <summary>Hints the ASR layer directly (the system instruction only steers the model):
-    /// selected languages become ISO-639 LanguageHints, none means explicit auto-detection.
-    /// Verified against the real API (2026-07) - hints reproducibly fix Georgian
-    /// misrecognition at utterance starts.</summary>
+    /// selected languages become ISO-639 <see cref="AudioTranscriptionConfig.LanguageCodes"/>;
+    /// none leaves them unset, which is auto-detection. Verified against the real API
+    /// (2026-07; re-verified 2026-09 after the SDK deprecated LanguageHints/LanguageAuto) -
+    /// hints reproducibly fix Georgian misrecognition at utterance starts.</summary>
     private static AudioTranscriptionConfig BuildTranscriptionConfig(IReadOnlyList<string> spokenLanguages)
     {
         var codes = spokenLanguages
             .Select(LanguageCatalog.CodeFor)
             .OfType<string>()
             .ToList();
-        return codes.Count > 0
-            ? new AudioTranscriptionConfig { LanguageHints = new LanguageHints { LanguageCodes = codes } }
-            : new AudioTranscriptionConfig { LanguageAuto = new LanguageAuto() };
+        return new AudioTranscriptionConfig { LanguageCodes = codes.Count > 0 ? codes : null };
     }
 
     private static string BuildSystemInstruction(IReadOnlyList<string> spokenLanguages)
