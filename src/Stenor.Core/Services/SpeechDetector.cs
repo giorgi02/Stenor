@@ -15,6 +15,8 @@ namespace Stenor.Services;
 /// (10th/90th percentile), and speech is declared only when the two are far enough apart, the
 /// peak is above the noise of a muted device, and the loud part lasts long enough to be a word
 /// rather than a keyboard click.
+/// If the whole clip is rejected, overlapping one-second windows are checked as well so long
+/// pauses cannot hide a short utterance in the global percentiles.
 ///
 /// Deliberately fails open: anything that cannot be measured confidently is reported as speech,
 /// because losing a real dictation is worse than one stray hallucination.
@@ -23,6 +25,7 @@ public static class SpeechDetector
 {
     private const int SamplesPerFrame = PcmFormat.SampleRateHz / 50; // 20 ms
     private const int FrameDurationMs = 20;
+    private const int WindowFrameCount = 1000 / FrameDurationMs;
 
     /// <summary>Below ~200 ms there is not enough audio for percentiles to mean anything.</summary>
     private const int MinimumFrameCount = 10;
@@ -87,7 +90,33 @@ public static class SpeechDetector
                 Math.Sqrt(squaredSampleSum / SamplesPerFrame) / 32768.0;
         }
 
-        var sortedLevels = (double[])rootMeanSquareLevels.Clone();
+        var overall = AnalyzeLevels(rootMeanSquareLevels);
+        if (overall.HasSpeech || frameCount <= WindowFrameCount)
+        {
+            return overall;
+        }
+
+        // A long quiet lead-in or tail must not dilute a real utterance below the global
+        // 90th percentile. Overlapping one-second windows also cover boundary-spanning words.
+        for (var offset = 0; offset < frameCount; offset += WindowFrameCount / 2)
+        {
+            var count = Math.Min(WindowFrameCount, frameCount - offset);
+            if (count < MinimumFrameCount)
+            {
+                break;
+            }
+            var window = AnalyzeLevels(rootMeanSquareLevels.AsSpan(offset, count));
+            if (window.HasSpeech)
+            {
+                return window;
+            }
+        }
+        return overall;
+    }
+
+    private static AnalysisResult AnalyzeLevels(ReadOnlySpan<double> levels)
+    {
+        var sortedLevels = levels.ToArray();
         Array.Sort(sortedLevels);
         var noiseFloor = Percentile(sortedLevels, 0.10);
         var signalPeak = Percentile(sortedLevels, 0.90);
@@ -96,7 +125,7 @@ public static class SpeechDetector
         // continuously spoken audio sit above it, so a pause-free clip still passes comfortably.
         var voicedThreshold = Math.Sqrt(Math.Max(noiseFloor, NoiseEpsilon) * signalPeak);
         var voicedFrameCount = 0;
-        foreach (var level in rootMeanSquareLevels)
+        foreach (var level in levels)
         {
             if (level >= voicedThreshold)
             {

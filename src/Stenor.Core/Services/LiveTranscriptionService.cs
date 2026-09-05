@@ -114,7 +114,9 @@ public sealed class LiveTranscriptionService
     /// </summary>
     public sealed class Session : IAsyncDisposable
     {
-        private readonly AsyncSession _session;
+        private readonly Func<CancellationToken, Task<LiveServerMessage?>> _receive;
+        private readonly Func<LiveSendRealtimeInputParameters, Task> _send;
+        private readonly Func<ValueTask> _dispose;
         private readonly Logger _log;
         private readonly Channel<string> _transcripts;
         private readonly CancellationTokenSource _receiveCts = new();
@@ -123,8 +125,16 @@ public sealed class LiveTranscriptionService
         private int _disposed;
 
         internal Session(AsyncSession session, Logger log)
+            : this(async ct => await session.ReceiveAsync(ct).ConfigureAwait(false),
+                async input => await session.SendRealtimeInputAsync(input).ConfigureAwait(false),
+                async () => await session.DisposeAsync().ConfigureAwait(false), log) { }
+
+        internal Session(Func<CancellationToken, Task<LiveServerMessage?>> receive,
+            Func<LiveSendRealtimeInputParameters, Task> send, Func<ValueTask> dispose, Logger log)
         {
-            _session = session;
+            _receive = receive;
+            _send = send;
+            _dispose = dispose;
             _log = log;
             _transcripts = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
             _receiveTask = Task.Run(ReceiveLoopAsync);
@@ -134,8 +144,7 @@ public sealed class LiveTranscriptionService
         public ChannelReader<string> Transcripts => _transcripts.Reader;
 
         /// <summary>Sends one chunk of raw 16 kHz / 16-bit / mono little-endian PCM.</summary>
-        public Task SendAudioAsync(byte[] pcm, CancellationToken ct) => _session
-            .SendRealtimeInputAsync(new LiveSendRealtimeInputParameters
+        public Task SendAudioAsync(byte[] pcm, CancellationToken ct) => _send(new LiveSendRealtimeInputParameters
             {
                 Audio = new Blob { MimeType = PcmFormat.MimeType, Data = pcm },
             })
@@ -147,32 +156,16 @@ public sealed class LiveTranscriptionService
         public async Task FinishAsync(TimeSpan timeout, CancellationToken ct)
         {
             _finishing = true;
+            await _send(new LiveSendRealtimeInputParameters { AudioStreamEnd = true })
+                .WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await _session
-                    .SendRealtimeInputAsync(new LiveSendRealtimeInputParameters { AudioStreamEnd = true })
-                    .WaitAsync(ct)
-                    .ConfigureAwait(false);
+                await _receiveTask.WaitAsync(timeout, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (TimeoutException ex)
             {
-                // Socket may already be dead; the receive task surfaces the real failure below.
-                _log.Warn($"Sending AudioStreamEnd failed ({ex.GetType().Name}).");
-            }
-
-            var finished = await Task.WhenAny(_receiveTask, Task.Delay(timeout, ct)).ConfigureAwait(false);
-            if (finished != _receiveTask)
-            {
-                _receiveCts.Cancel(); // give up on trailing chunks (timeout or caller cancel)
-            }
-            try
-            {
-                await _receiveTask.ConfigureAwait(false);
-            }
-            finally
-            {
-                _transcripts.Writer.TryComplete();
-                ct.ThrowIfCancellationRequested();
+                _receiveCts.Cancel();
+                throw new LiveTranscriptionException("Live typing timed out waiting for the final transcript.", ex);
             }
         }
 
@@ -183,10 +176,10 @@ public sealed class LiveTranscriptionService
             {
                 while (true)
                 {
-                    var message = await _session.ReceiveAsync(_receiveCts.Token).ConfigureAwait(false);
+                    var message = await _receive(_receiveCts.Token).ConfigureAwait(false);
                     if (message is null)
                     {
-                        break; // server closed the socket
+                        throw new LiveTranscriptionException("Live typing connection closed before completion.");
                     }
 
                     var content = message.ServerContent;
@@ -198,28 +191,27 @@ public sealed class LiveTranscriptionService
                     // Model replies (ModelTurn, audio) are deliberately ignored. Automatic VAD
                     // completes a turn after every utterance, so turn boundaries only mean
                     // "transcript done" once the dictation is finishing.
-                    if (_finishing && (content?.TurnComplete == true
-                        || content?.GenerationComplete == true
-                        || content?.InputTranscription?.Finished == true))
+                    if (_finishing && content?.TurnComplete == true)
                     {
                         break;
                     }
                     if (message.GoAway is not null)
                     {
-                        _log.Warn("Live session received GoAway from the server.");
-                        break;
+                        throw new LiveTranscriptionException("Live typing session ended before completion.");
                     }
                 }
                 writer.TryComplete();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (_receiveCts.IsCancellationRequested)
             {
                 writer.TryComplete();
+                throw;
             }
             catch (Exception ex)
             {
                 _log.Error("Live receive loop failed.", ex);
                 writer.TryComplete(ex);
+                throw;
             }
         }
 
@@ -232,7 +224,7 @@ public sealed class LiveTranscriptionService
             _receiveCts.Cancel();
             try
             {
-                await _session.DisposeAsync().ConfigureAwait(false);
+                await _dispose().ConfigureAwait(false);
             }
             catch
             {

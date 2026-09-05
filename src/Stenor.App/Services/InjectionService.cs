@@ -22,7 +22,21 @@ public sealed class InjectionService : ITextInjector
 
     private readonly Logger _log;
 
-    public InjectionService(Logger log) => _log = log;
+    private readonly Func<NativeMethods.INPUT[], uint> _sendInput;
+
+    public InjectionService(Logger log)
+        : this(log, inputs => NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.INPUT.Size)) { }
+
+    internal InjectionService(Logger log, Func<NativeMethods.INPUT[], uint> sendInput)
+    {
+        _log = log;
+        _sendInput = sendInput;
+    }
+
+    private sealed class InputDeliveryException(bool mayHaveInjectedText) : Exception
+    {
+        public bool MayHaveInjectedText { get; } = mayHaveInjectedText;
+    }
 
     public async Task InjectAsync(string text, bool useUnicodeTyping)
     {
@@ -31,6 +45,27 @@ public sealed class InjectionService : ITextInjector
             return;
         }
 
+        try
+        {
+            await InjectCoreAsync(text, useUnicodeTyping).ConfigureAwait(false);
+        }
+        catch (InputDeliveryException ex)
+        {
+            // Do not restore the old clipboard after a failed paste. Keep a persistent copy
+            // for manual recovery, including when Unicode typing was blocked partway through.
+            var copied = await OnStaAsync(Application.Current.Dispatcher,
+                () => TrySetClipboardText(text, persistent: true)).ConfigureAwait(false);
+            var message = copied
+                ? ex.MayHaveInjectedText
+                    ? "Text was only partly inserted. A copy is on the clipboard; check the field before pasting."
+                    : "Could not insert text. It is on the clipboard - paste it manually with Ctrl+V."
+                : "Could not insert text or copy it to the clipboard. Check the target app and try again.";
+            throw new TextInjectionException(message, ex.MayHaveInjectedText);
+        }
+    }
+
+    private async Task InjectCoreAsync(string text, bool useUnicodeTyping)
+    {
         if (useUnicodeTyping)
         {
             ReleaseStrayModifiers();
@@ -40,7 +75,6 @@ public sealed class InjectionService : ITextInjector
 
         var dispatcher = Application.Current.Dispatcher;
         var backup = await OnStaAsync(dispatcher, BackupClipboard).ConfigureAwait(false);
-
         var copied = await OnStaAsync(dispatcher, () => TrySetClipboardText(text)).ConfigureAwait(false);
         if (!copied)
         {
@@ -95,13 +129,13 @@ public sealed class InjectionService : ITextInjector
         return backup;
     }
 
-    private bool TrySetClipboardText(string text)
+    private bool TrySetClipboardText(string text, bool persistent = false)
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
             try
             {
-                Clipboard.SetDataObject(new DataObject(DataFormats.UnicodeText, text), copy: false);
+                Clipboard.SetDataObject(new DataObject(DataFormats.UnicodeText, text), copy: persistent);
                 return true;
             }
             catch (Exception)
@@ -167,7 +201,17 @@ public sealed class InjectionService : ITextInjector
             Key(VkV, up: true),
             Key(VkControl, up: true),
         };
-        Send(inputs);
+        try
+        {
+            Send(inputs);
+        }
+        catch (InputDeliveryException)
+        {
+            // A partial chord can leave Ctrl/V logically down. Release our own keys;
+            // failure of this best-effort cleanup must not hide the original failure.
+            _sendInput([Key(VkV, up: true), Key(VkControl, up: true)]);
+            throw;
+        }
     }
 
     /// <summary>Releases any physically-held modifiers (e.g. the hotkey's own Ctrl in Toggle
@@ -200,6 +244,7 @@ public sealed class InjectionService : ITextInjector
     private void TypeUnicode(string text)
     {
         const int chunkSize = 24;
+        var anyTextSent = false;
         var batch = new List<NativeMethods.INPUT>(chunkSize * 2);
         foreach (var ch in text)
         {
@@ -220,14 +265,27 @@ public sealed class InjectionService : ITextInjector
 
             if (batch.Count >= chunkSize * 2)
             {
-                Send(batch.ToArray());
+                SendTextBatch(batch.ToArray(), ref anyTextSent);
                 batch.Clear();
                 Thread.Sleep(5);
             }
         }
         if (batch.Count > 0)
         {
-            Send(batch.ToArray());
+            SendTextBatch(batch.ToArray(), ref anyTextSent);
+        }
+    }
+
+    private void SendTextBatch(NativeMethods.INPUT[] inputs, ref bool anyTextSent)
+    {
+        try
+        {
+            Send(inputs);
+            anyTextSent = true;
+        }
+        catch (InputDeliveryException ex)
+        {
+            throw new InputDeliveryException(anyTextSent || ex.MayHaveInjectedText);
         }
     }
 
@@ -263,10 +321,11 @@ public sealed class InjectionService : ITextInjector
 
     private void Send(NativeMethods.INPUT[] inputs)
     {
-        var sent = NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.INPUT.Size);
+        var sent = _sendInput(inputs);
         if (sent != inputs.Length)
         {
             _log.Warn($"SendInput injected {sent}/{inputs.Length} events (blocked by an elevated window?).");
+            throw new InputDeliveryException(sent > 0);
         }
     }
 }

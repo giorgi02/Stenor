@@ -18,7 +18,8 @@ pwsh scripts/pack.ps1                                     # Velopack installers,
   Primary path is CI: bump `<Version>` in Stenor.App.csproj, push, then trigger the
   `Release` workflow by hand (GitHub → Actions → Run workflow; `.github/workflows/release.yml`,
   `workflow_dispatch`) — it packs + uploads the release. Manual fallback runbook in docs/release.md. Installer is unsigned — SmartScreen warns on first run (known limitation).
-- No test project; verification is a manual smoke run
+- Regression checks: `dotnet run --project tests/Stenor.RegressionTests -c Release` (no Gemini
+  calls or real keystrokes; clipboard checks restore the original contents). Also verify with a manual smoke run
   (launch exe → check `%APPDATA%\Stenor\logs\stenor.log` for "Stenor started", tray icon, quit via tray).
 - **NuGet:** the machine-wide config has a dead feed (`nuget.lb.ge`). The repo-root
   `NuGet.config` (`<clear />` + nuget.org) must stay, or restores fail.

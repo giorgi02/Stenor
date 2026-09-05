@@ -3,4 +3,7 @@
     <Project Path="src/Stenor.App/Stenor.App.csproj" />
     <Project Path="src/Stenor.Core/Stenor.Core.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Stenor.RegressionTests/Stenor.RegressionTests.csproj" />
+  </Folder>
 </Solution>

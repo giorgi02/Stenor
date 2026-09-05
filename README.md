@@ -104,3 +104,8 @@ A few small details:
 
 Stenor is written in C# (.NET 10 + WPF). Build instructions and the architecture description
 are in [CLAUDE.md](CLAUDE.md); the release process is in [docs/release.md](docs/release.md).
+
+Run regression checks with `dotnet run --project tests/Stenor.RegressionTests -c Release`.
+They cover pause-heavy recordings, blocked/partial input, and live-session failure handling
+without contacting Gemini, recording audio, or sending real keystrokes. Clipboard checks
+temporarily replace its contents and restore them afterwards.
