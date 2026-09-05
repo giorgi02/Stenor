@@ -69,7 +69,6 @@ public partial class App : Application
         var tray = _services.GetRequiredService<TrayIcon>();
         tray.Initialize(settings.Current.ActivationMode);
         tray.SettingsRequested += OpenSettings;
-        tray.SetupRequested += OpenSetupWizard;
         tray.QuitRequested += Shutdown;
         tray.CheckForUpdatesRequested += () => _ = CheckForUpdatesAsync(userInitiated: true);
         tray.RestartToUpdateRequested += RestartToApplyUpdate;
